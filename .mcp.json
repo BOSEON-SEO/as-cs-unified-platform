@@ -1,0 +1,60 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {}
+    },
+    "mysql-read": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-mysql-read"
+      ],
+      "env": {}
+    },
+    "mysql-write": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-mysql-write"
+      ],
+      "env": {}
+    },
+    "google-workspace": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-google-workspace"
+      ],
+      "env": {}
+    },
+    "resend": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-resend"
+      ],
+      "env": {}
+    },
+    "ssh": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-ssh"
+      ],
+      "env": {}
+    },
+    "n8n": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-n8n"
+      ],
+      "env": {}
+    }
+  }
+}
