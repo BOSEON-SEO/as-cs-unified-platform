@@ -6,55 +6,110 @@
         "-y",
         "@modelcontextprotocol/server-github"
       ],
-      "env": {}
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub API (PR, issue, repo, 코드 검색)"
     },
     "mysql-read": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-mysql-read"
+        "@benborla29/mcp-server-mysql"
       ],
-      "env": {}
+      "env": {
+        "MYSQL_HOST": "${MYSQL_HOST}",
+        "MYSQL_PORT": "${MYSQL_PORT:-3306}",
+        "MYSQL_USER": "${MYSQL_USER}",
+        "MYSQL_PASS": "${MYSQL_PASS}",
+        "MYSQL_DB": "${MYSQL_DB}"
+      },
+      "description": "MySQL read-only — 스키마 분석, 쿼리 튜닝, 인덱스 제안"
     },
     "mysql-write": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-mysql-write"
+        "@benborla29/mcp-server-mysql"
       ],
-      "env": {}
+      "env": {
+        "MYSQL_HOST": "${MYSQL_HOST}",
+        "MYSQL_PORT": "${MYSQL_PORT:-3306}",
+        "MYSQL_USER": "${MYSQL_WRITE_USER}",
+        "MYSQL_PASS": "${MYSQL_WRITE_PASS}",
+        "MYSQL_DB": "${MYSQL_DB}"
+      },
+      "description": "MySQL read-write — DDL/DML 실행 (Executor 전용)"
     },
     "google-workspace": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-google-workspace"
+        "google-workspace-mcp"
       ],
-      "env": {}
+      "description": "Google Workspace (Gmail, Sheets, Drive, Calendar, Docs, Slides, Forms)"
     },
     "resend": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-resend"
+        "resend-mcp"
       ],
-      "env": {}
+      "env": {
+        "RESEND_API_KEY": "${RESEND_API_KEY}"
+      },
+      "description": "Resend 이메일 발송 (공식)"
     },
     "ssh": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-ssh"
+        "mcp-server-ssh"
       ],
-      "env": {}
+      "description": "SSH 원격 실행 + SFTP 파일 전송 (FTP 대체)"
     },
     "n8n": {
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-n8n"
+        "n8n-mcp"
       ],
-      "env": {}
+      "env": {
+        "MCP_MODE": "stdio",
+        "N8N_API_URL": "${N8N_API_URL}",
+        "N8N_API_KEY": "${N8N_API_KEY}"
+      },
+      "description": "n8n 워크플로우 관리 + 1400개 노드 문서 검색"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "C:\\workspace"
+      ],
+      "description": "파일 읽기/쓰기 (호스트 C:\\workspace 루트)"
+    },
+    "perplexity": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@perplexity-ai/mcp-server"
+      ],
+      "env": {
+        "PERPLEXITY_API_KEY": "${PERPLEXITY_API_KEY}"
+      },
+      "description": "Perplexity AI 웹 검색/리서치 (공식)"
+    },
+    "excel": {
+      "command": "cmd",
+      "args": [
+        "/c",
+        "npx",
+        "--yes",
+        "@negokaz/excel-mcp-server"
+      ],
+      "description": "Excel 읽기/쓰기 (.xlsx, .xlsm)"
     }
   }
 }
