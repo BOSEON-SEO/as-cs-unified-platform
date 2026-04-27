@@ -26,21 +26,6 @@
       },
       "description": "MySQL read-only — 스키마 분석, 쿼리 튜닝, 인덱스 제안"
     },
-    "mysql-write": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@benborla29/mcp-server-mysql"
-      ],
-      "env": {
-        "MYSQL_HOST": "${MYSQL_HOST}",
-        "MYSQL_PORT": "${MYSQL_PORT:-3306}",
-        "MYSQL_USER": "${MYSQL_WRITE_USER}",
-        "MYSQL_PASS": "${MYSQL_WRITE_PASS}",
-        "MYSQL_DB": "${MYSQL_DB}"
-      },
-      "description": "MySQL read-write — DDL/DML 실행 (Executor 전용)"
-    },
     "google-workspace": {
       "command": "npx",
       "args": [
