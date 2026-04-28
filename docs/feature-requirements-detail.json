@@ -1,0 +1,694 @@
+{
+  "meta": {
+    "document": "Feature Requirements Detail Specification",
+    "scope": "(1) Auto-Assignment Toggle & Crew Pool, (2) Cost 3-Axis Input Form, (3) Shipment & Recall State Machine",
+    "createdAt": "2026-04-28",
+    "basedOn": ["CLAUDE.md", "ROADMAP.md", "docs/slides/06~08,12", "docs/ticket-lifecycle-tracking.md"]
+  },
+
+  "feature1_auto_assignment": {
+    "title": "(1) Auto-Assignment Toggle & Crew Pool ON/OFF",
+    "route": "/12",
+    "pageId": "12",
+    "phase": "Phase 3",
+
+    "components": {
+      "page_layout": {
+        "name": "TicketAssignPage",
+        "layout": "3-column on desktop: UnassignedQueue (240px) | AssigneeWorkload (1.4fr) | AssignmentConfigPanel (1fr)",
+        "mobile": "2-tab: [Unassigned Queue] [Assignee Status], config accessible via gear icon"
+      },
+
+      "AutoAssignToggleBanner": {
+        "description": "Full-width gradient banner at top of page, shows global ON/OFF toggle + live KPI",
+        "ui_elements": [
+          { "element": "toggle_switch",    "type": "Toggle (64x32px)", "label_off": "OFF", "label_on": "ON", "color_on": "#10B981", "color_off": "#CBD5E1" },
+          { "element": "mode_indicator",   "type": "text",            "value": "라운드 로빈 (부하 균형)", "when": "toggle ON" },
+          { "element": "crew_count",       "type": "badge",           "value": "5명 활성", "color": "#8B5CF6" }
+        ],
+        "kpi_row": [
+          { "key": "todayAutoAssigned",    "label": "금일 자동 배정",    "type": "number" },
+          { "key": "avgAssignTime",        "label": "평균 배정 시간",    "type": "duration", "unit": "초" },
+          { "key": "ruleViolations",       "label": "규칙 위반 (스킵)",  "type": "number" },
+          { "key": "unassignedRemaining",  "label": "미배정 잔여",      "type": "number", "alert_when": "> 0", "color": "#FCD34D" }
+        ],
+        "api_read": "GET /api/assignment-rules",
+        "api_toggle": "PUT /api/assignment-rules { enabled: boolean }",
+        "rbac_toggle": ["ADMIN"],
+        "rbac_view": ["TEAM_LEAD", "ADMIN"],
+        "toggle_behavior": {
+          "ON_to_OFF": "Immediate stop. New tickets stay unassigned until manual assignment. Existing queue unchanged. Confirm dialog: '자동 배정을 중지하시겠습니까? 신규 티켓은 수동 배정이 필요합니다.'",
+          "OFF_to_ON": "Immediate start. Any currently unassigned tickets remain in queue (not retroactively auto-assigned). Confirm dialog: '자동 배정을 활성화하시겠습니까? 신규 접수 건부터 자동 배정됩니다.'"
+        }
+      },
+
+      "CrewPoolPanel": {
+        "description": "Right panel showing individual crew member ON/OFF toggles",
+        "title": "자동 배정 풀 (크루 지정)",
+        "ui_elements": [
+          {
+            "element": "crew_card",
+            "repeat": "for each AS_ENGINEER",
+            "fields": [
+              { "field": "name",       "type": "text",    "example": "박수리" },
+              { "field": "role",       "type": "badge",   "value": "A/S" },
+              { "field": "workload",   "type": "text",    "format": "{current}/{max}", "example": "12/20" },
+              { "field": "status",     "type": "text",    "values": ["활성", "휴무 중"], "note": "휴무 중이면 카드 opacity 0.7" },
+              { "field": "toggle",     "type": "Toggle (38x20px)", "color_on": "#10B981", "color_off": "#CBD5E1" }
+            ],
+            "card_style_on":  "bg-[#F0FDF4] border border-[#86EFAC]",
+            "card_style_off": "bg-[#FEF3C7] border border-[#FCD34D] opacity-70"
+          }
+        ],
+        "settings_below_pool": [
+          { "field": "assignmentMode",  "type": "select",   "label": "배정 모드",         "options": ["라운드 로빈 (부하 균형)", "최소 부하 우선", "제품군 매칭"], "default": "라운드 로빈 (부하 균형)" },
+          { "field": "maxPerAssignee",  "type": "number",   "label": "담당자별 최대 보유", "default": 20, "min": 1, "max": 50, "unit": "건" },
+          { "field": "skipSlaExceeded", "type": "checkbox", "label": "SLA 초과 2건+ 담당자 스킵", "default": true },
+          { "field": "preferSameCustomer", "type": "checkbox", "label": "동일 고객 직전 담당자 우선", "default": false }
+        ],
+        "api_update": "PUT /api/assignment-rules",
+        "api_body_example": {
+          "enabled": true,
+          "mode": "ROUND_ROBIN",
+          "maxPerAssignee": 20,
+          "skipSlaExceeded": true,
+          "preferSameCustomer": false,
+          "crewPool": [
+            { "userId": 101, "enabled": true },
+            { "userId": 102, "enabled": true },
+            { "userId": 103, "enabled": false }
+          ]
+        },
+        "rbac_modify": ["ADMIN"],
+        "rbac_view": ["TEAM_LEAD", "ADMIN"]
+      },
+
+      "UnassignedQueuePanel": {
+        "description": "Left panel: draggable card list of unassigned tickets",
+        "title": "미배정 큐",
+        "api": "GET /api/tickets/unassigned?sort={sort}",
+        "card_fields": [
+          { "field": "ticketNo",    "type": "bold text", "example": "AS-2645" },
+          { "field": "customerName","type": "text" },
+          { "field": "productModel","type": "text" },
+          { "field": "ticketType",  "type": "badge" },
+          { "field": "receivedAt",  "type": "relative time", "example": "4h+" },
+          { "field": "waitBadge",   "type": "badge", "rules": { "< 2h": "none", "2h~4h": "amber", "> 4h": "red" } }
+        ],
+        "interactions": {
+          "desktop": "Drag card to AssigneeWorkload row to assign. On drop -> POST /api/tickets/{id}/assign { assigneeId }",
+          "mobile": "Each card has a [배정 ▼] dropdown to select assignee"
+        },
+        "sort_options": ["접수일시 (기본)", "긴급도", "제품유형"],
+        "bulk_action": {
+          "enabled": true,
+          "trigger": "Checkbox on each card, [일괄 배정] button at bottom",
+          "api": "POST /api/tickets/batch-assign { ticketIds: [], assigneeId }"
+        }
+      },
+
+      "AssigneeWorkloadPanel": {
+        "description": "Center panel: table showing each assignee's current workload",
+        "api": "GET /api/assignees/workload",
+        "columns": [
+          { "key": "name",      "label": "담당",  "type": "text+avatar" },
+          { "key": "workload",  "label": "부하",  "type": "progress_bar", "format": "{current}/{max}", "color_rules": { "<=50%": "#10B981", "50-80%": "#F59E0B", ">80%": "#EF4444" } },
+          { "key": "weekCount", "label": "금주",  "type": "number" },
+          { "key": "avgDays",   "label": "평균",  "type": "duration", "unit": "일" },
+          { "key": "slaCount",  "label": "SLA",   "type": "number", "color_rule": ">0 red" },
+          { "key": "responseRate","label": "응답", "type": "percent" },
+          { "key": "action",    "label": "",       "type": "button", "text": "+1", "tooltip": "미배정 큐에서 1건 즉시 배정" }
+        ],
+        "drop_target": true
+      }
+    },
+
+    "data_model": {
+      "AssignmentRule": {
+        "enabled":             "boolean",
+        "mode":                "'ROUND_ROBIN' | 'LEAST_LOADED' | 'CAPABILITY_MATCH'",
+        "maxPerAssignee":      "number",
+        "skipSlaExceeded":     "boolean",
+        "preferSameCustomer":  "boolean",
+        "crewPool":            "CrewMember[]",
+        "lastRoundRobinIndex": "number (server-internal)"
+      },
+      "CrewMember": {
+        "userId":    "number",
+        "name":      "string",
+        "enabled":   "boolean",
+        "current":   "number (active ticket count)",
+        "max":       "number (from maxPerAssignee)"
+      },
+      "AssigneeWorkload": {
+        "userId":       "number",
+        "name":         "string",
+        "current":      "number",
+        "max":          "number",
+        "weekCount":    "number",
+        "avgDays":      "number",
+        "slaExceeded":  "number",
+        "responseRate": "number (0~100)"
+      }
+    },
+
+    "scenarios": [
+      {
+        "id": "SC-ASSIGN-1",
+        "title": "팀장이 자동 배정 ON 전환",
+        "steps": [
+          "1. 팀장 로그인 -> /12 진입",
+          "2. AutoAssignToggleBanner의 토글이 OFF 상태",
+          "3. 토글 클릭 -> 확인 다이얼로그: '자동 배정을 활성화하시겠습니까?'",
+          "4. [확인] 클릭 -> PUT /api/assignment-rules { enabled: true }",
+          "5. 토글 ON으로 전환, KPI 행 표시, 배너 배경색 gradient(#1E40AF,#3B82F6)",
+          "6. 이후 신규 티켓 접수 시 서버에서 자동 배정 -> ENGINEER_ASSIGNED 이벤트 자동 생성",
+          "7. Sidebar footer '자동 배정' 텍스트가 'ON' 으로 변경"
+        ]
+      },
+      {
+        "id": "SC-ASSIGN-2",
+        "title": "크루 1명 풀에서 제외 (휴무)",
+        "steps": [
+          "1. 팀장 -> CrewPoolPanel에서 '윤기사' 토글 OFF 클릭",
+          "2. PUT /api/assignment-rules { crewPool: [...updated] }",
+          "3. 윤기사 카드 opacity-70 + '휴무 중' 표시",
+          "4. 이후 자동 배정 시 윤기사는 후보에서 제외",
+          "5. 윤기사 복귀 시 토글 다시 ON -> 즉시 자동 배정 대상 복원"
+        ]
+      },
+      {
+        "id": "SC-ASSIGN-3",
+        "title": "수동 드래그&드롭 배정",
+        "steps": [
+          "1. 팀장 -> UnassignedQueuePanel에서 AS-2645 카드를 마우스로 잡음",
+          "2. AssigneeWorkloadPanel의 '이정비 (8/20)' 행 위로 드래그",
+          "3. 드롭 -> POST /api/tickets/AS-2645/assign { assigneeId: 이정비 }",
+          "4. 미배정 큐에서 AS-2645 사라짐, 이정비 부하 8->9로 갱신",
+          "5. 이정비에게 알림 발송 + ENGINEER_ASSIGNED 이벤트 기록"
+        ]
+      }
+    ],
+
+    "api_endpoints": [
+      { "method": "GET",  "path": "/api/tickets/unassigned",              "params": "sort",          "response": "UnassignedTicket[]",  "rbac": "TEAM_LEAD+" },
+      { "method": "POST", "path": "/api/tickets/{id}/assign",             "body": "{ assigneeId }",  "response": "Ticket",              "rbac": "TEAM_LEAD+" },
+      { "method": "POST", "path": "/api/tickets/batch-assign",            "body": "{ ticketIds[], assigneeId }", "response": "{ assigned: number }", "rbac": "TEAM_LEAD+" },
+      { "method": "POST", "path": "/api/tickets/{id}/reassign",           "body": "{ assigneeId, reason }", "response": "Ticket",       "rbac": "TEAM_LEAD+" },
+      { "method": "GET",  "path": "/api/assignees/workload",              "params": "none",          "response": "AssigneeWorkload[]",  "rbac": "TEAM_LEAD+" },
+      { "method": "GET",  "path": "/api/assignment-rules",                "params": "none",          "response": "AssignmentRule",       "rbac": "TEAM_LEAD+" },
+      { "method": "PUT",  "path": "/api/assignment-rules",                "body": "AssignmentRule",  "response": "AssignmentRule",       "rbac": "ADMIN" },
+      { "method": "POST", "path": "/api/assignment-rules/execute",        "body": "{}",              "response": "{ assigned: number }", "rbac": "TEAM_LEAD+", "description": "Manually trigger auto-assign for all current unassigned" },
+      { "method": "GET",  "path": "/api/tickets/{id}/assignment-history", "params": "none",          "response": "AssignmentHistoryEntry[]", "rbac": "ALL" }
+    ]
+  },
+
+  "feature2_cost_3axis": {
+    "title": "(2) Cost 3-Axis (Expense / Payment / Compensation) Input Form",
+    "routes": ["/6 (Cost Tracking page)", "/tickets/:id (Ticket Detail step 4)"],
+    "phase": "Phase 3",
+
+    "components": {
+      "CostTrackingPage": {
+        "description": "Standalone cost management page at /6",
+        "sections": ["CostKpiRow", "CostFilters", "MonthlySummaryTable", "TicketCostList"]
+      },
+
+      "CostKpiRow": {
+        "cards": [
+          { "key": "totalExpense",      "label": "우리 지출",   "color": "red",   "prefix": "-", "format": "Intl.NumberFormat('ko-KR')" },
+          { "key": "totalPayment",      "label": "고객 수납",   "color": "green", "prefix": "+", "format": "Intl.NumberFormat('ko-KR')" },
+          { "key": "totalCompensation", "label": "본사 보상",   "color": "blue",  "prefix": "+", "format": "Intl.NumberFormat('ko-KR')" },
+          { "key": "netCost",           "label": "순비용",      "color": "auto",  "formula": "totalPayment + totalCompensation - totalExpense", "note": "양수=이익, 음수=손실" }
+        ],
+        "api": "GET /api/costs/summary?month={YYYY-MM}"
+      },
+
+      "CostFilters": {
+        "fields": [
+          { "key": "month",     "type": "month-picker", "default": "current month" },
+          { "key": "axis",      "type": "select",       "options": ["전체 유형", "지출", "수납", "보상"] },
+          { "key": "assignee",  "type": "select",       "options": "GET /api/assignees (dynamic)" },
+          { "key": "status",    "type": "select",       "options": ["승인 상태", "대기", "승인", "반려"] }
+        ]
+      },
+
+      "MonthlySummaryTable": {
+        "api": "GET /api/costs/summary?from={start}&to={end}",
+        "columns": [
+          { "key": "month",        "label": "월" },
+          { "key": "expense",      "label": "지출합계", "class": "red" },
+          { "key": "payment",      "label": "수납합계", "class": "green" },
+          { "key": "compensation", "label": "보상합계", "class": "blue" },
+          { "key": "net",          "label": "순비용",   "class": "bold" }
+        ],
+        "highlight_rule": "Current month row highlighted"
+      },
+
+      "TicketCostList": {
+        "api": "GET /api/costs?from&to&axis&assignee&status&page&size",
+        "columns": [
+          { "key": "ticketNo",    "label": "A/S#",  "type": "link -> /tickets/{id}" },
+          { "key": "customerName","label": "고객" },
+          { "key": "expense",     "label": "지출",   "class": "red" },
+          { "key": "payment",     "label": "수납",   "class": "green" },
+          { "key": "compensation","label": "보상",   "class": "blue" },
+          { "key": "net",         "label": "순",     "class": "bold" },
+          { "key": "status",      "label": "상태",   "type": "badge" },
+          { "key": "action",      "label": "",       "type": "button" }
+        ],
+        "row_style_rules": [
+          { "condition": "status === 'PENDING'", "class": "warn" },
+          { "condition": "status === 'REJECTED'","class": "error" }
+        ],
+        "pagination": "server-side, 20/page"
+      },
+
+      "CostEntryForm": {
+        "description": "Side panel (desktop) or bottom sheet (mobile) for adding/editing a cost entry",
+        "trigger": "[+ 비용 입력] button on CostTrackingPage or [비용 추가] on TicketDetailPage",
+        "form_fields": [
+          {
+            "field": "axis",
+            "type": "radio-group (3 buttons)",
+            "label": "비용 축",
+            "required": true,
+            "options": [
+              { "value": "OUR_EXPENSE",           "label": "지출", "buttonStyle": "btn-danger" },
+              { "value": "CUSTOMER_PAYMENT",      "label": "수납", "buttonStyle": "btn-secondary" },
+              { "value": "VENDOR_COMPENSATION",   "label": "보상", "buttonStyle": "btn-secondary" }
+            ],
+            "behavior": "Selecting an axis dynamically updates category options below"
+          },
+          {
+            "field": "category",
+            "type": "select",
+            "label": "항목",
+            "required": true,
+            "options_dynamic": {
+              "OUR_EXPENSE":         ["부품비", "택배비", "수리비", "기타 지출"],
+              "CUSTOMER_PAYMENT":    ["수리비 청구", "택배비 청구", "기타 수납"],
+              "VENDOR_COMPENSATION": ["클레임 보상금", "무상 수리 보전", "기타 보상"]
+            }
+          },
+          {
+            "field": "amount",
+            "type": "number",
+            "label": "금액 (원)",
+            "required": true,
+            "validation": "integer, min 0, max 99999999",
+            "display_format": "Input shows comma-separated on blur (Intl.NumberFormat). Raw integer on focus.",
+            "inputMode": "numeric"
+          },
+          {
+            "field": "description",
+            "type": "textarea",
+            "label": "비고",
+            "required": false,
+            "validation": "maxLength 500",
+            "placeholder": "비용 발생 사유"
+          },
+          {
+            "field": "receipt",
+            "type": "file-upload",
+            "label": "증빙 파일",
+            "required": false,
+            "validation": "maxSize 10MB, types: jpg/png/pdf",
+            "ui": "Drop zone with preview thumbnail"
+          }
+        ],
+        "actions": [
+          { "label": "취소",  "type": "secondary", "behavior": "Close panel, discard" },
+          { "label": "저장",  "type": "primary",   "api": "POST /api/tickets/{ticketId}/costs", "event": "COST_ADDED auto-logged" }
+        ],
+        "on_success": "Toast '비용이 등록되었습니다 (승인 대기)' + invalidate cost queries"
+      },
+
+      "CostApprovalActions": {
+        "description": "Approval/rejection buttons shown to TEAM_LEAD and ADMIN on PENDING cost entries",
+        "displayed_for": "status === 'PENDING'",
+        "actions": [
+          {
+            "label": "승인",
+            "type": "btn-success",
+            "api": "PATCH /api/tickets/{ticketId}/costs/{costId} { status: 'APPROVED' }",
+            "event": "COST_APPROVED auto-logged",
+            "effect": "Monthly aggregation updated"
+          },
+          {
+            "label": "반려",
+            "type": "btn-danger",
+            "requires": "reason (textarea, minLength 5)",
+            "api": "PATCH /api/tickets/{ticketId}/costs/{costId} { status: 'REJECTED', reason }",
+            "effect": "Cost entry marked rejected, assignee sees rejection reason"
+          }
+        ],
+        "rbac": ["TEAM_LEAD", "ADMIN"]
+      }
+    },
+
+    "data_model": {
+      "CostAxis": "'OUR_EXPENSE' | 'CUSTOMER_PAYMENT' | 'VENDOR_COMPENSATION'",
+      "CostStatus": "'PENDING' | 'APPROVED' | 'REJECTED'",
+      "CostEntry": {
+        "costId":      "number",
+        "ticketId":    "number",
+        "ticketNo":    "string",
+        "axis":        "CostAxis",
+        "category":    "string",
+        "amount":      "number (integer, won)",
+        "description": "string | null",
+        "receiptUrl":  "string | null",
+        "status":      "CostStatus",
+        "rejectionReason": "string | null",
+        "createdBy":   "number (userId)",
+        "createdByName":"string",
+        "approvedBy":  "number | null",
+        "createdAt":   "string (ISO8601)",
+        "updatedAt":   "string (ISO8601)"
+      },
+      "CostSummary": {
+        "month":        "string (YYYY-MM)",
+        "totalExpense": "number",
+        "totalPayment": "number",
+        "totalCompensation": "number",
+        "netCost":      "number"
+      }
+    },
+
+    "approval_state_machine": {
+      "transitions": [
+        { "from": "PENDING",  "to": "APPROVED", "actor": "TEAM_LEAD | ADMIN", "guard": "none" },
+        { "from": "PENDING",  "to": "REJECTED", "actor": "TEAM_LEAD | ADMIN", "guard": "reason required (minLength 5)" },
+        { "from": "REJECTED", "to": "PENDING",  "actor": "AS_ENGINEER (creator)", "guard": "amount or category must change (re-submit)" }
+      ],
+      "diagram": "PENDING --> APPROVED (by TEAM_LEAD/ADMIN)\n           --> REJECTED (by TEAM_LEAD/ADMIN, reason required)\n                 --> PENDING (by creator, re-submit with changes)"
+    },
+
+    "scenarios": [
+      {
+        "id": "SC-COST-1",
+        "title": "A/S 담당자 비용 입력 (티켓 상세에서)",
+        "steps": [
+          "1. 박수리 -> /tickets/AS-2641 (티켓 상세, 스텝 4 활성)",
+          "2. [비용 추가] 클릭 -> CostEntryForm 사이드 패널 표시",
+          "3. 축: [지출] 선택 -> 항목 드롭다운이 '부품비/택배비/수리비/기타' 로 변경",
+          "4. 항목: '부품비' 선택, 금액: 15000 입력 (blur 시 '15,000' 표시)",
+          "5. 비고: '좌측 드라이버 단선 교체'",
+          "6. [저장] -> POST /api/tickets/AS-2641/costs { axis:'OUR_EXPENSE', category:'부품비', amount:15000, description:'...' }",
+          "7. Toast: '비용이 등록되었습니다 (승인 대기)'",
+          "8. 서버: COST_ADDED 이벤트 자동 기록 { axis:'OUR_EXPENSE', amount:15000 }",
+          "9. CostTrackingPage 목록에 '대기' 상태로 표시"
+        ]
+      },
+      {
+        "id": "SC-COST-2",
+        "title": "팀장 비용 승인",
+        "steps": [
+          "1. 김팀장 -> /6 (비용 추적 페이지)",
+          "2. 필터: 승인 상태 = '대기' 선택",
+          "3. AS-2641 건 확인: 지출 15,000 / 수납 0 / 보상 0",
+          "4. [승인] 클릭",
+          "5. PATCH /api/tickets/AS-2641/costs/{costId} { status:'APPROVED' }",
+          "6. 서버: COST_APPROVED 이벤트 기록, 월별 집계 자동 갱신",
+          "7. 뱃지 '대기' -> '승인' 으로 변경, 월별 집계 행 수치 갱신"
+        ]
+      },
+      {
+        "id": "SC-COST-3",
+        "title": "팀장 비용 반려 -> 담당자 재입력",
+        "steps": [
+          "1. 김팀장 -> AS-2641 비용 건에서 [반려] 클릭",
+          "2. 사유 입력 모달: '부품비 견적서 첨부 필요' 입력 (minLength 5)",
+          "3. PATCH /api/tickets/AS-2641/costs/{costId} { status:'REJECTED', reason:'...' }",
+          "4. 박수리에게 알림: '비용 건이 반려되었습니다'",
+          "5. 박수리 -> 해당 비용 건 수정: 증빙 파일 첨부 + [재제출]",
+          "6. 상태: REJECTED -> PENDING"
+        ]
+      }
+    ],
+
+    "api_endpoints": [
+      { "method": "GET",    "path": "/api/tickets/{id}/costs",         "response": "CostEntry[]",     "rbac": "AS_ENGINEER(own), TEAM_LEAD+, ADMIN" },
+      { "method": "POST",   "path": "/api/tickets/{id}/costs",         "body": "CostEntryCreate",     "response": "CostEntry",       "rbac": "AS_ENGINEER, ADMIN" },
+      { "method": "PATCH",  "path": "/api/tickets/{id}/costs/{costId}","body": "CostEntryUpdate",     "response": "CostEntry",       "rbac": "AS_ENGINEER(creator), TEAM_LEAD+, ADMIN" },
+      { "method": "DELETE", "path": "/api/tickets/{id}/costs/{costId}","response": "204",              "rbac": "ADMIN only" },
+      { "method": "GET",    "path": "/api/costs/summary",              "params": "month or from&to",  "response": "CostSummary[]",   "rbac": "TEAM_LEAD+, ADMIN" },
+      { "method": "GET",    "path": "/api/costs",                      "params": "from,to,axis,assignee,status,page,size", "response": "PageResponse<CostEntryWithTicket>", "rbac": "TEAM_LEAD+, ADMIN" }
+    ]
+  },
+
+  "feature3_shipment_recall": {
+    "title": "(3) Shipment & Recall State Transitions",
+    "routes": ["/7 (Shipment page)", "/8 (Recall page)", "/tickets/:id (step 5)"],
+    "phase": "Phase 4",
+
+    "shipment": {
+      "state_machine": {
+        "statuses": [
+          { "value": "PREPARING", "label": "준비",     "badge": "b-slate",  "color": "#94A3B8", "condition": "Shipment created, no tracking number" },
+          { "value": "DISPATCHED","label": "발송",     "badge": "b-blue",   "color": "#3B82F6", "condition": "Tracking number entered" },
+          { "value": "DELIVERED", "label": "배달완료", "badge": "b-green",  "color": "#10B981", "condition": "Carrier API confirms delivery OR manual mark" },
+          { "value": "CANCELLED", "label": "취소",     "badge": "b-red",    "color": "#EF4444", "condition": "Cancelled before dispatch" }
+        ],
+        "transitions": [
+          { "from": "PREPARING",  "to": "DISPATCHED", "trigger": "trackingNo entered",    "auto": "true (on save with trackingNo)",  "event": "SHIPMENT_DISPATCHED" },
+          { "from": "PREPARING",  "to": "CANCELLED",  "trigger": "manual cancel",          "guard": "reason required",                "event": "STATUS_CHANGED" },
+          { "from": "DISPATCHED", "to": "DELIVERED",   "trigger": "carrier API or manual",  "auto": "carrier API polling (Phase 4)",   "event": "SHIPMENT_DELIVERED" },
+          { "from": "DISPATCHED", "to": "CANCELLED",   "trigger": "manual cancel (rare)",   "guard": "reason required",                "event": "STATUS_CHANGED" }
+        ],
+        "ascii": "PREPARING --(tracking entered)--> DISPATCHED --(carrier API/manual)--> DELIVERED\n     |                                   |\n     +----(cancel)----> CANCELLED <----+"
+      },
+
+      "cx_handover": {
+        "statuses": [
+          { "value": "NOT_REQUIRED", "label": "-",       "condition": "CX handover not checked" },
+          { "value": "PENDING",      "label": "CX",      "badge": "b-amber", "condition": "CX handover checked, not yet confirmed by CS/CX" },
+          { "value": "CONFIRMED",    "label": "CX OK",   "badge": "b-green", "condition": "CS/CX clicked [인계 확인]" }
+        ],
+        "transition": "NOT_REQUIRED is default. PENDING on shipment create with cxHandover=true. CONFIRMED on CS/CX confirmation."
+      },
+
+      "components": {
+        "ShipmentPage": {
+          "tabs": [
+            { "key": "preparing", "label": "출고 대기",     "count_api": "status=PREPARING" },
+            { "key": "dispatched","label": "배송 중",       "count_api": "status=DISPATCHED" },
+            { "key": "cx_pending","label": "CX 인계 대기",  "count_api": "cxHandover=PENDING" },
+            { "key": "completed", "label": "완료",          "count_api": "status=DELIVERED" }
+          ],
+          "table_columns": [
+            { "key": "checkbox" }, { "key": "ticketNo" }, { "key": "customerName" },
+            { "key": "productModel" }, { "key": "shipmentType" }, { "key": "carrier" },
+            { "key": "trackingNo" }, { "key": "status" }, { "key": "cxHandover" }, { "key": "action" }
+          ]
+        },
+
+        "ShipmentCreatePanel": {
+          "type": "Side panel (slides from right)",
+          "fields": [
+            { "field": "recipientName",  "auto_fill": "customer.name",    "required": true },
+            { "field": "recipientPhone", "auto_fill": "customer.phone",   "required": true },
+            { "field": "address",        "auto_fill": "customer.address", "required": true },
+            { "field": "shipmentType",   "options": ["수리 완료품", "교환 신품", "리퍼브 출고"], "required": true },
+            { "field": "carrier",        "options": ["CJ대한통운", "한진택배", "로젠택배", "우체국", "기타"], "required": true },
+            { "field": "trackingNo",     "validation": "optional now, digits only", "note": "If entered -> status auto-DISPATCHED" },
+            { "field": "cxHandover",     "type": "checkbox", "label": "CX 인계", "side_effect": "Notification to CS/CX team" },
+            { "field": "note",           "type": "textarea", "validation": "maxLength 500" }
+          ],
+          "api": "POST /api/shipments",
+          "on_success": "Toast + SHIPMENT_CREATED event + if trackingNo -> SHIPMENT_DISPATCHED event"
+        },
+
+        "TrackingLink": {
+          "description": "Button in table that opens carrier tracking page in new tab",
+          "url_patterns": {
+            "CJ대한통운": "https://trace.cjlogistics.com/web/detail.jsp?slipno={trackingNo}",
+            "한진택배":   "https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mession=&wblnb={trackingNo}",
+            "로젠택배":   "https://www.ilogen.com/web/personal/trace/{trackingNo}",
+            "우체국":     "https://service.epost.go.kr/trace.RetrieveDomRi498TraceList.comm?sid1={trackingNo}"
+          }
+        }
+      },
+
+      "data_model": {
+        "Shipment": {
+          "shipmentId":     "number",
+          "ticketId":       "number",
+          "ticketNo":       "string",
+          "recipientName":  "string",
+          "recipientPhone": "string",
+          "address":        "string",
+          "shipmentType":   "'REPAIRED' | 'EXCHANGE_NEW' | 'REFURBISHED'",
+          "carrier":        "string",
+          "trackingNo":     "string | null",
+          "status":         "ShipmentStatus",
+          "cxHandover":     "CxHandoverStatus",
+          "note":           "string | null",
+          "createdBy":      "number",
+          "createdAt":      "string (ISO8601)",
+          "dispatchedAt":   "string | null",
+          "deliveredAt":    "string | null"
+        }
+      }
+    },
+
+    "recall": {
+      "state_machine": {
+        "statuses": [
+          { "value": "REQUESTED",  "label": "요청",     "badge": "b-red",    "color": "#EF4444", "condition": "Recall created, no driver assigned" },
+          { "value": "ASSIGNED",   "label": "배정",     "badge": "b-blue",   "color": "#3B82F6", "condition": "Driver assigned" },
+          { "value": "COMPLETED",  "label": "수거완료", "badge": "b-green",  "color": "#10B981", "condition": "Driver confirms pickup" },
+          { "value": "CANCELLED",  "label": "취소",     "badge": "b-slate",  "color": "#94A3B8", "condition": "Cancelled before completion" }
+        ],
+        "transitions": [
+          { "from": "REQUESTED", "to": "ASSIGNED",  "trigger": "driverId set",  "event": "PICKUP_SCHEDULED",  "side_effect": "SMS to driver via MailLog" },
+          { "from": "REQUESTED", "to": "CANCELLED", "trigger": "manual cancel", "guard": "reason required" },
+          { "from": "ASSIGNED",  "to": "COMPLETED", "trigger": "manual confirm","event": "PICKUP_COMPLETED",  "additional_fields": "condition, grade (A/B/C)" },
+          { "from": "ASSIGNED",  "to": "REQUESTED", "trigger": "driver reassign","guard": "reason required, old driver unlinked" },
+          { "from": "ASSIGNED",  "to": "CANCELLED", "trigger": "manual cancel", "guard": "reason required" }
+        ],
+        "ascii": "REQUESTED --(driver assigned + SMS)--> ASSIGNED --(pickup confirmed)--> COMPLETED\n     |                                     |    |\n     +-----(cancel)-----> CANCELLED <------+    +---(reassign)---> REQUESTED"
+      },
+
+      "overdue_tracking": {
+        "description": "Recalls where pickupDate < today AND status != COMPLETED are 'overdue'",
+        "display": "Overdue count shown as red KPI card on RecallPage",
+        "alert": "1+ overdue -> TEAM_LEAD gets system notification daily at 09:00",
+        "filter": "Dedicated 'Overdue' tab or filter option"
+      },
+
+      "components": {
+        "RecallPage": {
+          "kpi_cards": [
+            { "key": "unretrieved",  "label": "미회수",     "color": "red",   "formula": "REQUESTED + ASSIGNED count" },
+            { "key": "todayAssigned","label": "금일 배정",  "color": "amber" },
+            { "key": "todayDone",    "label": "금일 완료",  "color": "green" },
+            { "key": "avgDays",      "label": "평균 회수일","color": "default","unit": "일" }
+          ],
+          "tabs": [
+            { "key": "waiting",  "label": "회수 대기", "filter": "status=REQUESTED" },
+            { "key": "assigned", "label": "기사 배정", "filter": "status=ASSIGNED" },
+            { "key": "overdue",  "label": "미회수",    "filter": "status IN (REQUESTED,ASSIGNED) AND pickupDate < today", "badge_color": "red" },
+            { "key": "done",     "label": "완료",      "filter": "status=COMPLETED" }
+          ],
+          "table_columns": [
+            { "key": "recallNo" }, { "key": "ticketNo" }, { "key": "customerName" },
+            { "key": "productModel" }, { "key": "receivedAt" }, { "key": "elapsed" },
+            { "key": "method" }, { "key": "driverName" }, { "key": "status" }, { "key": "action" }
+          ]
+        },
+
+        "RecallCreatePanel": {
+          "fields": [
+            { "field": "ticketId",       "auto": true },
+            { "field": "customerName",   "auto_fill": "customer.name",    "readonly": true },
+            { "field": "customerPhone",  "auto_fill": "customer.phone",   "readonly": true },
+            { "field": "address",        "auto_fill": "customer.address", "required": true, "editable": true },
+            { "field": "product",        "auto_fill": "ticket.product",   "readonly": true },
+            { "field": "recallMethod",   "type": "radio", "options": ["기사 직접", "일반 택배"], "required": true },
+            { "field": "driverId",       "type": "select", "visible_when": "method === '기사 직접'", "options": "GET /api/drivers?available=true", "label_format": "{name} ({current}/{max}) {recommendation}" },
+            { "field": "pickupDate",     "type": "date",   "required": true, "min": "today", "default": "tomorrow" },
+            { "field": "note",           "type": "textarea", "maxLength": 500 }
+          ],
+          "driver_recommendation": "Lowest workload driver highlighted with '추천' tag",
+          "api": "POST /api/recalls",
+          "on_success": "Toast + PICKUP_SCHEDULED event + SMS to driver (MailLog)"
+        },
+
+        "DriverWorkloadChart": {
+          "description": "Horizontal bar chart showing each driver's current assignment count",
+          "api": "GET /api/drivers",
+          "bar_color_rules": { "<=3": "#10B981", "4-6": "#F59E0B", ">=7": "#EF4444" },
+          "max_display": 10,
+          "fields_per_driver": ["name", "currentAssignments", "maxCapacity", "todayCompleted"]
+        }
+      },
+
+      "data_model": {
+        "Recall": {
+          "recallId":      "number",
+          "ticketId":      "number",
+          "ticketNo":      "string",
+          "customerName":  "string",
+          "customerPhone": "string",
+          "address":       "string",
+          "productModel":  "string",
+          "recallMethod":  "'DRIVER_DIRECT' | 'COURIER'",
+          "driverId":      "number | null",
+          "driverName":    "string | null",
+          "pickupDate":    "string (YYYY-MM-DD)",
+          "status":        "RecallStatus",
+          "condition":     "string | null (filled on completion)",
+          "grade":         "'A' | 'B' | 'C' | null (filled on completion)",
+          "note":          "string | null",
+          "createdBy":     "number",
+          "createdAt":     "string (ISO8601)",
+          "completedAt":   "string | null"
+        },
+        "Driver": {
+          "driverId":            "number",
+          "name":                "string",
+          "phone":               "string",
+          "region":              "string",
+          "currentAssignments":  "number",
+          "maxCapacity":         "number (default 10)",
+          "todayCompleted":      "number",
+          "available":           "boolean"
+        }
+      },
+
+      "scenarios": [
+        {
+          "id": "SC-RECALL-1",
+          "title": "A/S 담당자 회수 요청 (기사 직접)",
+          "steps": [
+            "1. 박수리 -> /tickets/AS-2641 (스텝 5) -> [회수 요청]",
+            "2. RecallCreatePanel 표시 (고객/제품 자동 채움)",
+            "3. 방식: '기사 직접' 선택 -> driverId 드롭다운 표시",
+            "4. 기사: '윤기사 (3/10) 추천' 선택, 수거일: 2026-04-29",
+            "5. [요청 저장] -> POST /api/recalls { ticketId, driverId, pickupDate, method:'DRIVER_DIRECT' }",
+            "6. 서버: Recall 생성 (status: ASSIGNED), PICKUP_SCHEDULED 이벤트 기록",
+            "7. 서버: 윤기사에게 SMS 발송 + MailLog 기록",
+            "8. Toast: '회수 요청이 등록되었습니다'",
+            "9. 회수 관리 페이지에 '배정' 상태로 표시, 윤기사 부하 3->4"
+          ]
+        },
+        {
+          "id": "SC-RECALL-2",
+          "title": "팀장 미회수 건 모니터링 및 재배정",
+          "steps": [
+            "1. 김팀장 -> /8 (회수 관리) -> KPI: 미회수 7건, 지연 2건",
+            "2. '미회수' 탭 클릭 -> 지연 건 목록 (pickupDate < today)",
+            "3. RT-415 건: 2일 초과, 기사 미배정 -> [기사 배정] 클릭",
+            "4. 기사 선택: '정기사 (5/10)' -> 수거일: 오늘",
+            "5. PATCH /api/recalls/RT-415 { driverId, pickupDate }",
+            "6. 상태: REQUESTED -> ASSIGNED, SMS 발송, 미회수 7->6"
+          ]
+        },
+        {
+          "id": "SC-RECALL-3",
+          "title": "수거 완료 확인 + 검수 등급",
+          "steps": [
+            "1. 박수리 -> 회수 관리 -> RT-412 '배정' 상태 건",
+            "2. [수거 완료] 클릭 -> 확인 모달 표시",
+            "3. 상태: '외관 양호', 등급: 'A' 선택",
+            "4. PATCH /api/recalls/RT-412 { status:'COMPLETED', condition:'외관 양호', grade:'A' }",
+            "5. PICKUP_COMPLETED 이벤트 기록 { condition, grade }",
+            "6. 교환/반품 페이지에서 이 건의 검수 등급(A) 기반으로 재고/리퍼브/폐기 분기 진행"
+          ]
+        }
+      ],
+
+      "api_endpoints": [
+        { "method": "GET",    "path": "/api/recalls",            "params": "from,to,status,driverId,page,size", "response": "PageResponse<Recall>" },
+        { "method": "POST",   "path": "/api/recalls",            "body": "RecallCreate",    "response": "Recall" },
+        { "method": "PATCH",  "path": "/api/recalls/{id}",       "body": "RecallUpdate",    "response": "Recall" },
+        { "method": "DELETE", "path": "/api/recalls/{id}",       "response": "204",          "rbac": "ADMIN" },
+        { "method": "GET",    "path": "/api/recalls/pending",    "response": "Recall[]",     "description": "All REQUESTED + ASSIGNED" },
+        { "method": "GET",    "path": "/api/drivers",            "params": "available",      "response": "Driver[]" },
+        { "method": "GET",    "path": "/api/drivers/{id}/recalls","params": "from,to",       "response": "Recall[]" }
+      ]
+    }
+  }
+}
