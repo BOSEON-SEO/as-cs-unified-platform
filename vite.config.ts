@@ -14,8 +14,23 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+
+  // Electron prod 빌드 시 상대 경로로 로드 (file:// 프로토콜 대응)
+  base: './',
+
   server: {
     port: 5173,
-    open: true,
+    // Electron dev 모드에서는 자동 브라우저 열기 비활성화
+    open: false,
+  },
+
+  // Renderer에서 접근 가능한 빌드 타임 상수
+  define: {
+    VITE_DEV_SERVER_URL: JSON.stringify('http://localhost:5173'),
+  },
+
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
   },
 })

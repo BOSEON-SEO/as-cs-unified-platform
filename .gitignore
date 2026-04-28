@@ -6,6 +6,10 @@ dist/
 build/
 *.tsbuildinfo
 
+# Electron builder output
+release/
+build-resources/
+
 # Environment
 .env
 .env.*
