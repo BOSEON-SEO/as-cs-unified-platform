@@ -1,0 +1,1729 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A/S & CS 통합 플랫폼 — Prototype v2</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:#0F172A;font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR','Segoe UI',sans-serif;color:#1E293B;font-size:13px}
+  button{font-family:inherit;cursor:pointer}
+
+  /* ===== APP SHELL ===== */
+  .app{display:grid;grid-template-rows:32px 56px 1fr 22px;grid-template-columns:240px 1fr;height:100vh;background:#F8FAFC}
+  .titlebar{grid-column:1/3;background:linear-gradient(180deg,#1E3A8A,#1E40AF);color:#FFF;display:flex;align-items:center;padding:0 14px;font-size:11px;font-weight:600;letter-spacing:.04em;-webkit-app-region:drag;justify-content:space-between}
+  .titlebar .lights{display:flex;gap:8px}
+  .titlebar .lights span{width:12px;height:12px;border-radius:50%}
+  .titlebar .lights .r{background:#EF4444}.titlebar .lights .y{background:#F59E0B}.titlebar .lights .g{background:#10B981}
+  .titlebar .center{flex:1;text-align:center;color:#BFDBFE}
+  .titlebar .right{font-size:10px;color:#93C5FD}
+
+  .topbar{grid-column:2/3;background:#FFF;border-bottom:1px solid #E2E8F0;display:flex;align-items:center;padding:0 24px;gap:14px}
+  .crumb{color:#64748B;font-size:12px;font-weight:500;flex:0 0 auto}
+  .crumb b{color:#1E40AF}
+  .global-search{flex:1;max-width:380px;position:relative}
+  .global-search input{width:100%;padding:8px 14px 8px 34px;border:1px solid #E2E8F0;border-radius:8px;background:#F8FAFC;font-size:12px}
+  .global-search::before{content:"🔍";position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:11px;opacity:.6}
+  .topbar-spacer{flex:1}
+  .top-actions{display:flex;align-items:center;gap:10px}
+  .top-actions .icon-btn{width:34px;height:34px;border-radius:8px;border:none;background:transparent;display:flex;align-items:center;justify-content:center;font-size:15px;color:#475569;position:relative}
+  .top-actions .icon-btn:hover{background:#F1F5F9}
+  .top-actions .icon-btn .dot{position:absolute;top:6px;right:6px;width:8px;height:8px;background:#EF4444;border-radius:50%;border:2px solid #FFF}
+  .user{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border-radius:20px;background:#F1F5F9}
+  .user .avatar{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#8B5CF6);color:#FFF;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700}
+  .user .name{font-size:12px;font-weight:600;color:#1E293B}
+  .user .role{font-size:10px;color:#64748B}
+
+  /* ===== SIDEBAR ===== */
+  .sidebar{grid-row:2/4;background:#0F172A;color:#CBD5E1;padding:14px 0;overflow-y:auto;scrollbar-width:thin}
+  .sidebar::-webkit-scrollbar{width:6px}
+  .sidebar::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}
+  .sidebar .brand{display:flex;align-items:center;gap:10px;padding:0 18px 14px;border-bottom:1px solid rgba(255,255,255,.08);margin-bottom:12px}
+  .sidebar .brand .logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,#3B82F6,#8B5CF6);display:flex;align-items:center;justify-content:center;font-weight:800;color:#FFF;font-size:14px}
+  .sidebar .brand .txt{font-size:13px;font-weight:700;color:#F1F5F9;line-height:1.2}
+  .sidebar .brand .txt small{display:block;font-size:10px;color:#64748B;font-weight:500;margin-top:2px}
+  .nav-group{padding:0 10px;margin-bottom:14px}
+  .nav-group-title{font-size:10px;color:#475569;font-weight:700;letter-spacing:.08em;padding:0 10px 6px;text-transform:uppercase}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-radius:7px;font-size:12.5px;color:#94A3B8;cursor:pointer;transition:all .15s;font-weight:500;position:relative}
+  .nav-item:hover{background:rgba(255,255,255,.05);color:#F1F5F9}
+  .nav-item.active{background:linear-gradient(90deg,#1E40AF,#3B82F6);color:#FFF;font-weight:600;box-shadow:0 2px 8px rgba(59,130,246,.3)}
+  .nav-item .ico{width:18px;font-size:14px;text-align:center;flex:0 0 auto}
+  .nav-item .lbl{flex:1}
+  .nav-item .num{background:rgba(255,255,255,.1);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700}
+  .nav-item.active .num{background:rgba(255,255,255,.25)}
+  .nav-item .badge-dot{width:7px;height:7px;border-radius:50%;background:#EF4444}
+
+  /* ===== MAIN ===== */
+  .main{grid-column:2/3;grid-row:3/4;overflow-y:auto;padding:24px 32px;background:#F8FAFC}
+  .page{display:none;animation:fadeIn .25s ease}
+  .page.active{display:block}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .page-header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #E2E8F0}
+  .page-header h1{font-size:22px;font-weight:800;color:#0F172A;letter-spacing:-.01em}
+  .page-header .desc{font-size:12px;color:#64748B;margin-top:4px}
+  .page-header .actions{display:flex;gap:8px;align-items:center}
+
+  /* ===== STATUSBAR ===== */
+  .statusbar{grid-column:1/3;background:#1E40AF;color:#BFDBFE;font-size:10px;display:flex;align-items:center;padding:0 14px;gap:14px}
+  .statusbar .sep{opacity:.4}
+  .statusbar .live{color:#86EFAC}
+
+  /* ===== UI PRIMITIVES ===== */
+  h2{font-size:15px;font-weight:700;color:#1E293B;margin-bottom:10px}
+  h3{font-size:13px;font-weight:700;color:#1E40AF;margin-bottom:8px}
+  .muted{color:#94A3B8}
+  .small{font-size:11px}
+  .card{background:#FFF;border:1px solid #E2E8F0;border-radius:10px;padding:16px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .grid{display:grid;gap:12px}
+  .row{display:flex;gap:12px}
+  .row>*{flex:1}
+
+  .badge{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10.5px;font-weight:700;letter-spacing:.01em}
+  .b-blue{background:#DBEAFE;color:#1E40AF}.b-green{background:#DCFCE7;color:#166534}.b-amber{background:#FEF3C7;color:#92400E}.b-red{background:#FEE2E2;color:#991B1B}.b-slate{background:#F1F5F9;color:#475569}.b-violet{background:#EDE9FE;color:#7C3AED}
+
+  .btn{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:600;border:none;display:inline-flex;align-items:center;gap:5px;transition:all .15s}
+  .btn-primary{background:#1E40AF;color:#FFF}.btn-primary:hover{background:#1E3A8A}
+  .btn-secondary{background:#FFF;color:#475569;border:1px solid #E2E8F0}.btn-secondary:hover{background:#F1F5F9}
+  .btn-danger{background:#FEE2E2;color:#991B1B}.btn-danger:hover{background:#FCA5A5}
+  .btn-success{background:#DCFCE7;color:#166534}
+  .btn-sm{padding:4px 10px;font-size:11px}
+
+  input,select,textarea{padding:7px 12px;border:1px solid #E2E8F0;border-radius:7px;background:#FFF;font-size:12px;font-family:inherit;color:#1E293B}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:#3B82F6;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+  label.lbl{font-size:10.5px;color:#64748B;font-weight:600;display:block;margin-bottom:4px}
+
+  table{width:100%;border-collapse:collapse;font-size:11.5px}
+  th{background:#F8FAFC;color:#475569;font-weight:600;text-align:left;padding:8px 12px;border-bottom:1px solid #E2E8F0;font-size:11px;letter-spacing:.02em;text-transform:uppercase}
+  td{padding:9px 12px;border-bottom:1px solid #F1F5F9;color:#334155}
+  tr:hover td{background:#F8FAFC}
+  tr.highlight td{background:#EFF6FF}
+  tr.warn td{background:#FFFBEB}
+  tr.error td{background:#FEF2F2}
+
+  .kpi{background:#FFF;border:1px solid #E2E8F0;border-radius:10px;padding:14px;text-align:left}
+  .kpi .label{font-size:11px;color:#64748B;font-weight:500;margin-bottom:4px}
+  .kpi .num{font-size:24px;font-weight:800;color:#0F172A;line-height:1.1}
+  .kpi .num small{font-size:13px;font-weight:600;color:#64748B}
+  .kpi .delta{font-size:11px;font-weight:600;margin-top:6px}
+  .kpi .delta.up{color:#10B981}.kpi .delta.dn{color:#EF4444}
+  .kpi.accent-blue{border-top:3px solid #3B82F6}
+  .kpi.accent-green{border-top:3px solid #10B981}
+  .kpi.accent-amber{border-top:3px solid #F59E0B}
+  .kpi.accent-red{border-top:3px solid #EF4444}
+  .kpi.accent-violet{border-top:3px solid #8B5CF6}
+  .kpi.accent-cyan{border-top:3px solid #06B6D4}
+
+  .tabs{display:flex;border-bottom:2px solid #E2E8F0;margin-bottom:14px}
+  .tab{padding:9px 18px;font-size:12px;font-weight:600;color:#64748B;border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer}
+  .tab:hover{color:#1E293B}
+  .tab.active{color:#1E40AF;border-bottom-color:#1E40AF}
+  .tab .badge{margin-left:6px;font-size:9.5px;padding:1px 6px}
+
+  .panel{background:#FFF;border:1px solid #E2E8F0;border-left:3px solid #3B82F6;border-radius:8px;padding:14px;font-size:12px}
+  .panel .ph{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+  .panel .ph strong{font-size:13px}
+  .panel .close{cursor:pointer;color:#94A3B8;font-size:14px}
+
+  /* progress */
+  .pgbar{height:8px;background:#E2E8F0;border-radius:4px;overflow:hidden}
+  .pgbar>div{height:100%;background:#3B82F6;border-radius:4px;transition:width .3s}
+
+  /* timeline */
+  .tl{position:relative;padding-left:22px}
+  .tl::before{content:"";position:absolute;left:7px;top:4px;bottom:4px;width:2px;background:#E2E8F0}
+  .tl-item{position:relative;margin-bottom:12px;font-size:12px}
+  .tl-dot{position:absolute;left:-19px;top:2px;width:14px;height:14px;border-radius:50%;border:3px solid #FFF;box-shadow:0 0 0 1px #E2E8F0}
+  .tl-dot.b{background:#3B82F6;box-shadow:0 0 0 3px #DBEAFE}
+  .tl-dot.g{background:#10B981;box-shadow:0 0 0 3px #DCFCE7}
+  .tl-dot.r{background:#EF4444;box-shadow:0 0 0 3px #FEE2E2}
+  .tl-dot.a{background:#F59E0B;box-shadow:0 0 0 3px #FEF3C7}
+  .tl-dot.s{background:#94A3B8;box-shadow:0 0 0 3px #F1F5F9}
+
+  /* charts */
+  .donut{width:90px;height:90px;border-radius:50%;position:relative}
+  .donut::after{content:"";position:absolute;inset:18px;background:#FFF;border-radius:50%}
+  .bar-h{display:flex;align-items:center;gap:6px;font-size:11px;margin:5px 0}
+  .bar-h .lbl{width:60px;color:#475569}
+  .bar-h .track{flex:1;height:14px;background:#F1F5F9;border-radius:3px;overflow:hidden}
+  .bar-h .fill{height:100%;border-radius:3px}
+  .bar-h .val{width:30px;text-align:right;font-weight:700}
+
+  /* flow */
+  .flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .flow-step{background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF;padding:6px 12px;border-radius:7px;font-size:11.5px;font-weight:600}
+  .flow-arrow{color:#94A3B8}
+
+  /* drag card */
+  .drag{cursor:grab;background:#FFF;border:1px solid #E2E8F0;border-radius:8px;padding:10px;font-size:12px;margin-bottom:8px;transition:all .15s}
+  .drag:hover{border-color:#3B82F6;box-shadow:0 2px 8px rgba(59,130,246,.15)}
+
+  /* sidebar (in-page) for nested layouts — none, app already has one */
+  .step-ind{display:flex;align-items:center;font-size:12px;margin-bottom:16px;padding:14px;background:#FFF;border-radius:8px;border:1px solid #E2E8F0}
+  .step-ind .step{display:flex;align-items:center;gap:7px;font-weight:600;color:#94A3B8}
+  .step-ind .step.done{color:#10B981}
+  .step-ind .step.active{color:#1E40AF;font-weight:700}
+  .step-ind .num{width:24px;height:24px;border-radius:50%;background:#E2E8F0;color:#94A3B8;display:flex;align-items:center;justify-content:center;font-size:11px}
+  .step-ind .step.done .num{background:#10B981;color:#FFF}
+  .step-ind .step.active .num{background:#1E40AF;color:#FFF}
+  .step-ind .line{flex:1;height:2px;background:#E2E8F0;margin:0 10px}
+  .step-ind .line.done{background:#10B981}
+  .step-ind .line.active{background:#3B82F6}
+
+  /* note box */
+  .note{padding:10px 12px;border-radius:7px;font-size:11.5px;line-height:1.6}
+  .note-amber{background:#FFFBEB;color:#92400E;border:1px dashed #FCD34D}
+  .note-blue{background:#EFF6FF;color:#1E40AF;border:1px dashed #93C5FD}
+  .note-red{background:#FEF2F2;color:#991B1B;border:1px dashed #FCA5A5}
+
+  /* utilities */
+  .mt{margin-top:14px}.mb{margin-bottom:14px}
+  .center{text-align:center}
+  .strong{font-weight:700}
+  .red{color:#EF4444}.green{color:#10B981}.amber{color:#F59E0B}.blue{color:#1E40AF}
+  code{font-family:'Consolas','Courier New',monospace;font-size:11px;background:#F1F5F9;padding:1px 5px;border-radius:3px;color:#475569}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Title bar -->
+  <div class="titlebar">
+    <div class="lights"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+    <div class="center">A/S &amp; CS 통합 관리 플랫폼 — v0.2.0-prototype</div>
+    <div class="right">🟢 연결됨 · 25명 온라인</div>
+  </div>
+
+  <!-- Top bar -->
+  <div class="topbar">
+    <div class="crumb">홈 › <b id="crumb">고객 정보 조회</b></div>
+    <div class="global-search"><input placeholder="전화번호 / A/S# / 고객명 / 시리얼 (Ctrl+K)"></div>
+    <div class="topbar-spacer"></div>
+    <div class="top-actions">
+      <button class="icon-btn" title="새 A/S 접수">＋</button>
+      <button class="icon-btn" title="알림">🔔<span class="dot"></span></button>
+      <button class="icon-btn" title="다크모드">🌙</button>
+      <div class="user">
+        <div class="avatar">박수</div>
+        <div><div class="name">박수리</div><div class="role">A/S 담당자</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">A</div><div class="txt">A/S &amp; CS<small>통합 관리 플랫폼</small></div></div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">고객 &amp; 상담</div>
+      <div class="nav-item active" data-page="1"><span class="ico">👤</span><span class="lbl">고객 정보 조회</span></div>
+      <div class="nav-item" data-page="2"><span class="ico">💬</span><span class="lbl">전체 상담 내역</span><span class="num">42</span></div>
+      <div class="nav-item" data-page="3"><span class="ico">🔗</span><span class="lbl">젠데스크 조회</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">A/S 운영</div>
+      <div class="nav-item" data-page="tickets"><span class="ico">📋</span><span class="lbl">A/S 티켓 목록</span><span class="num">82</span></div>
+      <div class="nav-item" data-page="4"><span class="ico">🛠</span><span class="lbl">A/S 상세 (단계별)</span></div>
+      <div class="nav-item" data-page="5"><span class="ico">📊</span><span class="lbl">A/S 현황 대시보드</span><span class="badge-dot"></span></div>
+      <div class="nav-item" data-page="6"><span class="ico">💰</span><span class="lbl">A/S 비용 추적</span></div>
+      <div class="nav-item" data-page="7"><span class="ico">📦</span><span class="lbl">A/S 출고 관리</span><span class="num">12</span></div>
+      <div class="nav-item" data-page="8"><span class="ico">🚚</span><span class="lbl">회수 관리</span><span class="num">14</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">제품 &amp; 처리</div>
+      <div class="nav-item" data-page="9"><span class="ico">🏷</span><span class="lbl">정품등록 · 시리얼</span></div>
+      <div class="nav-item" data-page="10"><span class="ico">🔄</span><span class="lbl">교환 · 반품</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">커뮤니케이션</div>
+      <div class="nav-item" data-page="11"><span class="ico">📧</span><span class="lbl">이메일 · SMS 로그</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">AI 어시스턴트</div>
+      <div class="nav-item" data-page="ai"><span class="ico">🤖</span><span class="lbl">AI 의사결정 서포트</span><span style="background:linear-gradient(135deg,#8B5CF6,#3B82F6);color:#FFF;font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700">NEW</span></div>
+    </div>
+
+    <div class="nav-group">
+      <div class="nav-group-title">관리</div>
+      <div class="nav-item" data-page="12"><span class="ico">👥</span><span class="lbl">티켓 배분</span><span class="num">5</span></div>
+      <div class="nav-item" data-page="13"><span class="ico">📑</span><span class="lbl">리포트</span><span style="background:#475569;color:#CBD5E1;font-size:9px;padding:2px 6px;border-radius:8px;font-weight:700">설계 중</span></div>
+      <div class="nav-item" data-page="14"><span class="ico">📈</span><span class="lbl">전체 통계</span></div>
+      <div class="nav-item" data-page="15"><span class="ico">⚙</span><span class="lbl">설정</span></div>
+    </div>
+
+    <div class="nav-group" style="margin-top:auto;padding:14px 18px 0;border-top:1px solid rgba(255,255,255,.06)">
+      <div style="font-size:10.5px;color:#64748B;line-height:1.6">
+        <div>🔌 Spring API <span style="color:#86EFAC">●</span></div>
+        <div>🤖 AI 서포트 (Claude) <span style="color:#86EFAC">●</span></div>
+        <div>⚡ 자동 배정 <span style="color:#86EFAC">ON</span></div>
+        <div style="color:#475569;margin-top:4px">v0.2.0 · 04-28 14:22</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- ============ PAGE 1: 고객 조회 ============ -->
+    <section class="page active" data-page="1">
+      <div class="page-header">
+        <div><h1>👤 고객 정보 조회</h1><p class="desc">전화번호 기반 통합 고객 뷰 · 5개 탭으로 모든 이력 통합</p></div>
+        <div class="actions"><button class="btn btn-secondary">📤 내보내기</button><button class="btn btn-primary">+ 신규 고객 등록</button></div>
+      </div>
+
+      <div class="card mb">
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:0 0 220px"><label class="lbl">전화번호 *</label><input value="010-1234-5678" style="width:100%;font-family:monospace"></div>
+          <div style="flex:0 0 160px"><label class="lbl">고객명</label><input placeholder="(선택)" style="width:100%"></div>
+          <div style="flex:0 0 140px"><label class="lbl">상태</label><select style="width:100%"><option>전체</option><option>VIP</option><option>일반</option></select></div>
+          <button class="btn btn-primary">🔍 조회</button>
+          <button class="btn btn-secondary">초기화</button>
+        </div>
+      </div>
+
+      <div class="card mb" style="background:linear-gradient(135deg,#EFF6FF,#FFF)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:14px">
+            <div style="width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,#3B82F6,#8B5CF6);color:#FFF;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700">김민</div>
+            <div>
+              <div style="font-size:18px;font-weight:800">김민수 <span class="badge b-green">VIP</span> <span class="badge b-blue">정품 2건</span></div>
+              <div class="small muted">010-1234-5678 · minsu@email.com · 가입 2024-08-15</div>
+            </div>
+          </div>
+          <div class="actions"><button class="btn btn-secondary btn-sm">정보 편집</button><button class="btn btn-primary btn-sm">+ A/S 접수</button></div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;font-size:11.5px">
+          <div><div class="muted small">총 구매 금액</div><div class="strong" style="font-size:14px">1,250,000원</div></div>
+          <div><div class="muted small">최근 구매</div><div class="strong">2026-03-22</div></div>
+          <div><div class="muted small">A/S 건수</div><div class="strong">3건 (진행 1)</div></div>
+          <div><div class="muted small">최근 상담</div><div class="strong">2026-04-20</div></div>
+          <div><div class="muted small">정품등록</div><div class="strong">2건 / 보증 유효</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tabs">
+          <div class="tab active">구매이력 (5)</div>
+          <div class="tab">A/S이력 (3)</div>
+          <div class="tab">상담이력 (8)</div>
+          <div class="tab">정품등록 (2)</div>
+          <div class="tab">메모</div>
+        </div>
+        <table>
+          <tr><th>주문번호</th><th>주문일</th><th>제품</th><th>모델</th><th>금액</th><th>배송</th><th>A/S</th><th>액션</th></tr>
+          <tr><td>ORD-26-041</td><td>2026-03-22</td><td>이어폰 Pro</td><td>WE-300</td><td>329,000</td><td><span class="badge b-green">완료</span></td><td><span class="badge b-amber">진행 AS-2641</span></td><td><button class="btn btn-secondary btn-sm">상세</button></td></tr>
+          <tr><td>ORD-25-118</td><td>2025-11-05</td><td>블루투스 스피커</td><td>BS-200</td><td>189,000</td><td><span class="badge b-green">완료</span></td><td>—</td><td><button class="btn btn-primary btn-sm">+ A/S</button></td></tr>
+          <tr><td>ORD-25-075</td><td>2025-07-18</td><td>충전 케이스</td><td>CC-100</td><td>59,000</td><td><span class="badge b-green">완료</span></td><td><span class="badge b-blue">완료 AS-2402</span></td><td><button class="btn btn-secondary btn-sm">조회</button></td></tr>
+          <tr><td>ORD-25-018</td><td>2025-02-11</td><td>이어폰 Lite</td><td>WE-200</td><td>149,000</td><td><span class="badge b-green">완료</span></td><td>—</td><td><button class="btn btn-primary btn-sm">+ A/S</button></td></tr>
+          <tr><td>ORD-24-099</td><td>2024-09-30</td><td>스마트워치</td><td>SW-100</td><td>299,000</td><td><span class="badge b-green">완료</span></td><td>—</td><td><button class="btn btn-primary btn-sm">+ A/S</button></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 2: 전체 상담 내역 ============ -->
+    <section class="page" data-page="2">
+      <div class="page-header">
+        <div><h1>💬 전체 상담 내역</h1><p class="desc">채널 통합 · crm_call_memo 402K건 + tbnws_send_sms_result 2.6M건</p></div>
+        <div class="actions"><label class="small"><input type="checkbox"> 내 상담만</label><button class="btn btn-secondary">📤 Excel</button></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi"><div class="label">금일 상담</div><div class="num">42</div></div>
+        <div class="kpi accent-blue"><div class="label">📞 전화</div><div class="num">28</div></div>
+        <div class="kpi accent-green"><div class="label">💬 카카오</div><div class="num">9</div></div>
+        <div class="kpi accent-amber"><div class="label">📧 이메일 / SMS</div><div class="num">5</div></div>
+        <div class="kpi accent-red"><div class="label">A/S 연결</div><div class="num">14</div></div>
+      </div>
+
+      <div class="card mb">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input placeholder="전화번호 / 키워드" style="flex:1;min-width:200px">
+          <select><option>전체 채널</option><option>전화</option><option>카카오</option><option>이메일</option><option>SMS</option></select>
+          <select><option>최근 7일</option><option>오늘</option><option>최근 30일</option></select>
+          <select><option>전체 담당자</option><option>이수진</option><option>최민호</option></select>
+          <button class="btn btn-primary">🔍 검색</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">
+        <div class="card">
+          <table>
+            <tr><th>일시</th><th>채널</th><th>고객</th><th>요약</th><th>담당</th><th>A/S</th></tr>
+            <tr class="highlight"><td>04-28 14:22</td><td><span class="badge b-blue">📞 전화</span></td><td>김민수</td><td>좌측 이어폰 무음 증상</td><td>이수진</td><td><span class="badge b-amber">AS-2641</span></td></tr>
+            <tr><td>04-28 11:05</td><td><span class="badge b-green">💬 카카오</span></td><td>박지영</td><td>배송 지연 확인 요청</td><td>최민호</td><td>—</td></tr>
+            <tr><td>04-28 09:48</td><td><span class="badge b-blue">📞 전화</span></td><td>정하늘</td><td>충전 케이스 호환 문의</td><td>이수진</td><td>—</td></tr>
+            <tr><td>04-27 16:30</td><td><span class="badge b-slate">📧 이메일</span></td><td>이준혁</td><td>정품등록 방법 안내</td><td>이수진</td><td>—</td></tr>
+            <tr><td>04-27 14:12</td><td><span class="badge b-amber">📱 SMS</span></td><td>최은지</td><td>회수 일정 변경 요청</td><td>박수리</td><td><span class="badge b-amber">AS-2640</span></td></tr>
+            <tr><td>04-27 10:00</td><td><span class="badge b-blue">📞 전화</span></td><td>송민재</td><td>구매 후 5일 — 단순 변심 반품</td><td>최민호</td><td><span class="badge b-blue">AS-2636</span></td></tr>
+          </table>
+          <div style="text-align:right;margin-top:8px;font-size:11px;color:#94A3B8">« 1 2 3 ... 40,258 » · 10건/페이지 · 총 402,578건</div>
+        </div>
+        <div class="panel">
+          <div class="ph"><strong>상담 상세</strong><span class="badge b-blue">전화 · 04-28 14:22</span></div>
+          <label class="lbl">고객</label>
+          <div class="strong">김민수 · 010-1234-5678 <span class="badge b-green">VIP</span></div>
+          <label class="lbl mt">담당 / 통화시간</label>
+          <div>이수진 (CS/CX) · 4분 12초</div>
+          <label class="lbl mt">내용</label>
+          <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:7px;padding:10px;line-height:1.6">
+            좌측 이어폰에서 소리가 나지 않는다고 문의. 충전은 정상이라 배터리 문제는 아닌 듯. A/S 접수 안내 후 배송 라벨 발송 약속.
+          </div>
+          <label class="lbl mt">관련 티켓</label>
+          <div><span class="badge b-amber">AS-2641</span> 진행중 · 박수리</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px">
+            <button class="btn btn-primary btn-sm">+ A/S 접수</button>
+            <button class="btn btn-secondary btn-sm">📧 이메일</button>
+            <button class="btn btn-secondary btn-sm">📱 SMS</button>
+            <button class="btn btn-secondary btn-sm">고객 페이지</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 3: 젠데스크 조회 (외부 연동) ============ -->
+    <section class="page" data-page="3">
+      <div class="page-header">
+        <div><h1>🔗 젠데스크 조회</h1><p class="desc">티켓 번호로 Zendesk API 직접 조회 · 신규 티켓 등록 시에는 사용 안 함 (마이그레이션 완료)</p></div>
+        <div class="actions"><span class="badge b-green">API 연결됨</span><button class="btn btn-secondary">⚙ API 설정</button></div>
+      </div>
+
+      <div class="card mb" style="background:linear-gradient(135deg,#EFF6FF,#FFF);border-left:3px solid #3B82F6">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="font-size:22px">🔍</div>
+          <div style="flex:1"><h3 style="margin:0">티켓 번호로 조회</h3><div class="small muted">Zendesk 티켓 ID 또는 URL 붙여넣기 → 즉시 가져오기</div></div>
+          <input value="ZD-48021" placeholder="ZD-XXXXX 또는 URL" style="flex:1;max-width:320px;font-family:monospace">
+          <button class="btn btn-primary">🔍 조회</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:14px">
+        <div>
+          <div class="card mb">
+            <h3>인증 / 권한</h3>
+            <label class="lbl">서브도메인</label>
+            <input value="tbnws.zendesk.com" style="width:100%" readonly>
+            <label class="lbl mt">인증 방식</label>
+            <select style="width:100%"><option>Bearer Token (권장)</option><option>OAuth 2.0</option><option>Basic Auth (API 키)</option></select>
+            <label class="lbl mt">Bearer Token</label>
+            <div style="display:flex;gap:6px"><input value="••••••••••••••••gNSe" style="flex:1;font-family:monospace"><button class="btn btn-secondary btn-sm">갱신</button></div>
+            <div class="small muted mt">만료: 2026-12-31 · 권한: <code>tickets:read</code> <code>users:read</code></div>
+            <button class="btn btn-secondary" style="width:100%;margin-top:10px">🔌 연결 테스트</button>
+          </div>
+          <div class="card">
+            <h3>최근 조회 이력 (캐시)</h3>
+            <table>
+              <tr><th>티켓#</th><th>제목</th><th>조회 시각</th></tr>
+              <tr class="highlight"><td><code>ZD-48021</code></td><td>이어폰 충전 불량</td><td>방금 전</td></tr>
+              <tr><td><code>ZD-47892</code></td><td>리모컨 페어링 실패</td><td>2시간 전</td></tr>
+              <tr><td><code>ZD-47651</code></td><td>스피커 노이즈 문의</td><td>04-27 16:30</td></tr>
+              <tr><td><code>ZD-47502</code></td><td>구매 후 단순 변심 반품</td><td>04-26 11:08</td></tr>
+            </table>
+            <div class="note note-amber mt">⚡ 캐시: 1회 조회 후 24시간 동안 재호출 없이 표시 (API quota 절약)</div>
+          </div>
+        </div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+            <div>
+              <h3 style="margin:0">📄 ZD-48021 — 이어폰 충전 불량</h3>
+              <div class="small muted">요청자: kim@email.com · 2025-08-12 14:08 · <span class="badge b-green">solved</span></div>
+            </div>
+            <div class="actions"><button class="btn btn-secondary btn-sm">🔗 Zendesk에서 보기</button><button class="btn btn-primary btn-sm">+ A/S 티켓 연결</button></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">
+            <div class="kpi"><div class="label">우선도</div><div class="num" style="font-size:14px">Normal</div></div>
+            <div class="kpi"><div class="label">담당</div><div class="num" style="font-size:14px">support_b</div></div>
+            <div class="kpi"><div class="label">댓글</div><div class="num" style="font-size:14px">7</div></div>
+            <div class="kpi"><div class="label">최근 업데이트</div><div class="num" style="font-size:14px">04-26</div></div>
+          </div>
+          <h3>대화 이력</h3>
+          <div class="tl">
+            <div class="tl-item"><span class="tl-dot b"></span>
+              <div><strong>2025-08-12 14:08</strong> · 고객 (kim@email.com)</div>
+              <div class="small" style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;padding:8px;margin-top:4px">충전이 정상인데 좌측 이어폰에서 소리가 나지 않습니다. 구매 후 5개월 됐어요.</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot g"></span>
+              <div><strong>2025-08-12 16:30</strong> · 상담사 (support_b)</div>
+              <div class="small" style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:6px;padding:8px;margin-top:4px">A/S 접수를 안내해 드리겠습니다. 제품 시리얼 번호 알려주실 수 있나요?</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot b"></span>
+              <div><strong>2025-08-13 09:15</strong> · 고객</div>
+              <div class="small" style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;padding:8px;margin-top:4px">WE300-2025-00128 입니다.</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot s"></span>
+              <div class="muted">... 4개 댓글 펼치기</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot a"></span>
+              <div><strong>2025-08-22 11:00</strong> · 시스템 — 티켓 종결 (solved)</div>
+            </div>
+          </div>
+          <div class="note note-blue mt">
+            <strong>💡 사용 시나리오:</strong> 과거 Zendesk에서 처리된 동일 고객의 문의 이력을 새 A/S 접수 시 참고. 신규 티켓은 이 시스템에서 직접 등록하므로 Zendesk에 더 이상 쓰지 않음.
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE TICKETS: A/S 티켓 목록 ============ -->
+    <section class="page" data-page="tickets">
+      <div class="page-header">
+        <div><h1>📋 A/S 티켓 목록</h1><p class="desc">내 담당 / 팀원 / 전체 토글 · 상태 · 우선도 · 기간 다중 필터</p></div>
+        <div class="actions"><button class="btn btn-secondary">📤 Excel</button><button class="btn btn-primary">+ 신규 A/S 접수</button></div>
+      </div>
+
+      <!-- Scope toggle -->
+      <div class="card mb" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <strong style="font-size:12px;color:#475569">조회 범위</strong>
+        <div style="display:flex;border:1px solid #E2E8F0;border-radius:7px;overflow:hidden">
+          <button class="btn btn-primary btn-sm" style="border-radius:0">👤 내 담당 <span style="opacity:.7">(12)</span></button>
+          <button class="btn btn-secondary btn-sm" style="border-radius:0;border:none">👥 우리 팀 <span class="muted">(82)</span></button>
+          <button class="btn btn-secondary btn-sm" style="border-radius:0;border:none">🌐 전체 <span class="muted">(247)</span></button>
+        </div>
+        <span class="sep" style="color:#CBD5E1">|</span>
+        <select><option>최근 30일</option><option>오늘</option><option>최근 7일</option></select>
+        <select><option>전체 상태</option><option>접수</option><option>배정됨</option><option>진행중</option><option>완료</option></select>
+        <select><option>전체 우선도</option><option>VIP</option><option>긴급</option><option>일반</option></select>
+        <select><option>전체 유형</option><option>수리</option><option>교환</option><option>반품</option></select>
+        <input placeholder="A/S# / 고객명 / 시리얼" style="flex:1;min-width:180px">
+        <button class="btn btn-primary">🔍 검색</button>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-blue"><div class="label">전체 진행중</div><div class="num">82</div></div>
+        <div class="kpi"><div class="label">내 담당</div><div class="num">12</div></div>
+        <div class="kpi accent-amber"><div class="label">SLA 임박</div><div class="num amber">7</div></div>
+        <div class="kpi accent-red"><div class="label">SLA 초과</div><div class="num red">4</div></div>
+        <div class="kpi accent-violet"><div class="label">금주 완료</div><div class="num" style="color:#8B5CF6">28</div></div>
+      </div>
+
+      <div class="card">
+        <table>
+          <tr>
+            <th><input type="checkbox"></th>
+            <th>A/S#</th><th>고객</th><th>제품</th><th>유형</th>
+            <th>담당</th><th>상태</th><th>경과</th><th>SLA</th>
+            <th>마지막 액션</th><th></th>
+          </tr>
+          <tr class="highlight">
+            <td><input type="checkbox"></td>
+            <td><strong>AS-2641</strong></td><td>김민수 <span class="badge b-green">VIP</span></td><td>WE-300</td><td><span class="badge b-blue">수리</span></td>
+            <td><strong>박수리 (나)</strong></td><td><span class="badge b-amber">진행중</span></td><td>2일 5h</td><td class="green">52%</td>
+            <td>04-29 15:00 EMAIL</td><td><button class="btn btn-primary btn-sm">상세 →</button></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>AS-2640</td><td>최은지</td><td>WE-300</td><td><span class="badge b-amber">반품</span></td>
+            <td>박수리 (나)</td><td><span class="badge b-amber">회수중</span></td><td>3일</td><td class="amber">68%</td>
+            <td>04-27 SMS</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td>
+          </tr>
+          <tr class="error">
+            <td><input type="checkbox"></td>
+            <td class="strong red">AS-2589</td><td>박지영</td><td>BS-200</td><td><span class="badge b-blue">수리</span></td>
+            <td>박수리 (나)</td><td><span class="badge b-red">정체</span></td><td class="red">14일</td><td class="red">280%</td>
+            <td>04-14 배정</td><td><button class="btn btn-danger btn-sm">⚠ 조치</button></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>AS-2638</td><td>박지영</td><td>BS-200</td><td><span class="badge b-blue">수리</span></td>
+            <td class="muted">김기술 (팀)</td><td><span class="badge b-blue">출고대기</span></td><td>4일</td><td class="green">80%</td>
+            <td>04-28 비용 승인</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>AS-2635</td><td>이준혁</td><td>CC-100</td><td><span class="badge b-amber">교환</span></td>
+            <td class="muted">이정비 (팀)</td><td><span class="badge b-blue">배송중</span></td><td>5일</td><td class="green">100%</td>
+            <td>04-26 송장 등록</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td>
+          </tr>
+          <tr>
+            <td><input type="checkbox"></td>
+            <td>AS-2636</td><td>송민재</td><td>BS-200</td><td><span class="badge b-amber">반품</span></td>
+            <td class="muted">최기술 (팀)</td><td><span class="badge b-amber">검수중</span></td><td>8일</td><td class="amber">160%</td>
+            <td>04-25 회수 완료</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td>
+          </tr>
+          <tr class="warn">
+            <td><input type="checkbox"></td>
+            <td>AS-2611</td><td>정하늘</td><td>WE-200</td><td><span class="badge b-blue">수리</span></td>
+            <td class="muted">김기술 (팀)</td><td><span class="badge b-amber">회수 미접수</span></td><td class="amber">9일</td><td class="amber">180%</td>
+            <td>04-19 회수 요청</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td>
+          </tr>
+        </table>
+        <!-- bulk action -->
+        <div style="margin-top:10px;padding:8px 12px;background:#F1F5F9;border-radius:7px;display:flex;justify-content:space-between;align-items:center;font-size:11.5px">
+          <span class="muted">2건 선택됨</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm">담당 변경</button>
+            <button class="btn btn-secondary btn-sm">📧 일괄 메시지</button>
+            <button class="btn btn-secondary btn-sm">상태 변경</button>
+          </div>
+        </div>
+        <div style="text-align:right;margin-top:8px;font-size:11px;color:#94A3B8">« 1 2 3 ... 26 » · 10건/페이지 · 총 247건</div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 4: A/S 상세 ============ -->
+    <section class="page" data-page="4">
+      <div class="page-header">
+        <div><h1>🛠 A/S 상세 — AS-2641 <span class="badge b-amber" style="font-size:12px">진행중</span></h1>
+          <p class="desc">김민수 · WE-300 이어폰 Pro · 접수 04-28 09:12 (경과 2일 5시간)</p></div>
+        <div class="actions">
+          <button class="btn btn-secondary">담당 변경</button>
+          <button class="btn btn-secondary">상태 변경 ▾</button>
+          <button class="btn btn-primary">완료 처리</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-blue"><div class="label">경과</div><div class="num blue">2일 5h</div></div>
+        <div class="kpi accent-green"><div class="label">SLA 사용</div><div class="num green">52%</div><div class="delta up">목표 5일 이내</div></div>
+        <div class="kpi"><div class="label">담당</div><div class="num" style="font-size:18px">박수리</div></div>
+        <div class="kpi accent-red"><div class="label">순비용</div><div class="num red">+5,000</div></div>
+        <div class="kpi accent-violet"><div class="label">소통</div><div class="num">3회</div></div>
+      </div>
+
+      <!-- ===== Stepper (앱처럼 단계별) ===== -->
+      <div class="card mb" style="background:linear-gradient(180deg,#F8FAFC,#FFF)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <h3 style="margin:0">처리 진행 상태</h3>
+          <span class="small muted">현재 <strong class="blue">3단계: 진단 / 처리 결정</strong> · 다음 자동 안내: 작업 완료 시 출고 단계 활성화</span>
+        </div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <!-- Step 1 done -->
+          <div style="flex:1;padding:10px;background:#DCFCE7;border:2px solid #10B981;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:#166534;font-size:11.5px"><span style="width:20px;height:20px;border-radius:50%;background:#10B981;color:#FFF;display:flex;align-items:center;justify-content:center;font-size:11px">✓</span> 1. 접수</div>
+            <div class="small" style="color:#166534;margin-top:4px">04-28 09:12 · 이수진</div>
+            <div class="small muted" style="margin-top:2px">전화 인입 · 자동 매칭</div>
+          </div>
+          <div style="display:flex;align-items:center;color:#10B981">→</div>
+          <!-- Step 2 done -->
+          <div style="flex:1;padding:10px;background:#DCFCE7;border:2px solid #10B981;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:#166534;font-size:11.5px"><span style="width:20px;height:20px;border-radius:50%;background:#10B981;color:#FFF;display:flex;align-items:center;justify-content:center;font-size:11px">✓</span> 2. 배정</div>
+            <div class="small" style="color:#166534;margin-top:4px">04-28 10:45 · 박수리</div>
+            <div class="small muted" style="margin-top:2px">자동 배정 (라운드로빈)</div>
+          </div>
+          <div style="display:flex;align-items:center;color:#3B82F6">→</div>
+          <!-- Step 3 active -->
+          <div style="flex:1.2;padding:10px;background:#DBEAFE;border:2px solid #1E40AF;border-radius:8px;box-shadow:0 0 0 3px rgba(30,64,175,.15)">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:700;color:#1E40AF;font-size:11.5px"><span style="width:20px;height:20px;border-radius:50%;background:#1E40AF;color:#FFF;display:flex;align-items:center;justify-content:center;font-size:11px">3</span> 진단 / 처리 결정</div>
+            <div class="small" style="color:#1E40AF;margin-top:4px"><strong>현재 진행 중</strong></div>
+            <div class="small" style="color:#475569;margin-top:2px">증상: 좌측 무음<br>진단: 드라이버 단선<br>결정: <strong>수리</strong> (보상 신청)</div>
+            <button class="btn btn-primary btn-sm" style="margin-top:6px;width:100%">계속 진행 →</button>
+          </div>
+          <div style="display:flex;align-items:center;color:#CBD5E1">→</div>
+          <!-- Step 4 -->
+          <div style="flex:1;padding:10px;background:#F8FAFC;border:2px dashed #CBD5E1;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:600;color:#94A3B8;font-size:11.5px"><span style="width:20px;height:20px;border-radius:50%;background:#E2E8F0;color:#94A3B8;display:flex;align-items:center;justify-content:center;font-size:11px">4</span> 비용 입력</div>
+            <div class="small muted" style="margin-top:4px">지출 / 수납 / 보상 3축</div>
+          </div>
+          <div style="display:flex;align-items:center;color:#CBD5E1">→</div>
+          <!-- Step 5 -->
+          <div style="flex:1;padding:10px;background:#F8FAFC;border:2px dashed #CBD5E1;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:600;color:#94A3B8;font-size:11.5px"><span style="width:20px;height:20px;border-radius:50%;background:#E2E8F0;color:#94A3B8;display:flex;align-items:center;justify-content:center;font-size:11px">5</span> 출고 / 회수</div>
+            <div class="small muted" style="margin-top:4px">송장 + CX 인계</div>
+          </div>
+          <div style="display:flex;align-items:center;color:#CBD5E1">→</div>
+          <!-- Step 6 -->
+          <div style="flex:1;padding:10px;background:#F8FAFC;border:2px dashed #CBD5E1;border-radius:8px">
+            <div style="display:flex;align-items:center;gap:6px;font-weight:600;color:#94A3B8;font-size:11.5px"><span style="width:20px;height:20px;border-radius:50%;background:#E2E8F0;color:#94A3B8;display:flex;align-items:center;justify-content:center;font-size:11px">6</span> 종료</div>
+            <div class="small muted" style="margin-top:4px">완료 알림 · 평가</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:14px">
+        <div class="card">
+          <div class="tabs">
+            <div class="tab active">통합 타임라인</div>
+            <div class="tab">비용 내역</div>
+            <div class="tab">출고 내역</div>
+            <div class="tab">회수 내역</div>
+            <div class="tab">첨부 (3)</div>
+          </div>
+          <div class="tl">
+            <div class="tl-item"><span class="tl-dot b"></span>
+              <div><strong>04-28 09:12</strong> <span class="badge b-blue">TICKET_CREATED</span> · 이수진</div>
+              <div class="small muted">전화 인입 → 접수 폼에서 자동 매칭 후 저장</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot b"></span>
+              <div><strong>04-28 10:45</strong> <span class="badge b-blue">ENGINEER_ASSIGNED</span> · 김팀장 → 박수리</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot g"></span>
+              <div><strong>04-28 14:20</strong> <span class="badge b-green">WORK_STARTED</span> · 박수리</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot r"></span>
+              <div><strong>04-28 15:00</strong> <span class="badge b-red">FIRST_RESPONSE · 📧 EMAIL_SENT</span></div>
+              <div class="small muted">"수리 진행 안내 / 예상 완료 04-30" → minsu@email.com</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot a"></span>
+              <div><strong>04-29 11:30</strong> <span class="badge b-amber">COST_ADDED</span> · 부품(드라이버 유닛) -15,000</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot b"></span>
+              <div><strong>04-29 14:50</strong> <span class="badge b-blue">PHONE_CALL_LOGGED</span> · 박수리 → 고객 (3분 18초)</div>
+              <div class="small muted">부품 도착 안내, 04-30 출고 예정 약속</div>
+            </div>
+            <div class="tl-item"><span class="tl-dot s"></span>
+              <div class="muted"><strong>다음 단계:</strong> 작업 완료 → 출고 등록 → 종료</div>
+            </div>
+          </div>
+          <div style="margin-top:14px;padding-top:12px;border-top:1px solid #E2E8F0;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm">상태 변경 ▾</button>
+            <button class="btn btn-secondary btn-sm">📧 이메일</button>
+            <button class="btn btn-secondary btn-sm">📱 SMS</button>
+            <button class="btn btn-secondary btn-sm">💰 비용 추가</button>
+            <button class="btn btn-secondary btn-sm">📦 출고 등록</button>
+            <button class="btn btn-secondary btn-sm">🚚 회수 요청</button>
+          </div>
+        </div>
+        <div>
+          <div class="card mb">
+            <h3>고객</h3>
+            <div class="strong">김민수 <span class="badge b-green">VIP</span></div>
+            <div class="small muted">010-1234-5678 · minsu@email.com</div>
+            <div class="small muted">서울 강남구 테헤란로 123 401호</div>
+          </div>
+          <div class="card mb">
+            <h3>제품</h3>
+            <div class="strong">WE-300 이어폰 Pro</div>
+            <div class="small">시리얼 <code>WE300-2026-00412</code></div>
+            <div class="small muted">구매 2026-03-22 · 보증 ~2027-03-25 (남은 331일)</div>
+            <div style="display:flex;gap:5px;margin-top:8px">
+              <div style="width:42px;height:42px;background:linear-gradient(135deg,#CBD5E1,#94A3B8);border-radius:5px"></div>
+              <div style="width:42px;height:42px;background:linear-gradient(135deg,#94A3B8,#64748B);border-radius:5px"></div>
+              <div style="width:42px;height:42px;background:linear-gradient(135deg,#64748B,#475569);border-radius:5px"></div>
+            </div>
+          </div>
+          <div class="card mb">
+            <h3>증상 / 분류</h3>
+            <div>좌측 무음, 충전 정상</div>
+            <div style="margin-top:6px">
+              <span class="badge b-blue">수리</span>
+              <span class="badge b-amber">우선: 일반</span>
+              <span class="badge b-violet">음향 결함</span>
+            </div>
+          </div>
+          <div class="card mb">
+            <h3>처리 메모</h3>
+            <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:7px;padding:10px;font-size:12px;line-height:1.6">
+              드라이버 유닛 단선 확인 → 본사 보상 신청 예정
+            </div>
+            <div class="small muted" style="margin-top:6px;display:flex;justify-content:space-between">
+              <span>박수리 · 04-29 11:32</span>
+              <button class="btn btn-secondary btn-sm">+ 추가</button>
+            </div>
+          </div>
+          <!-- AI Suggestion Panel -->
+          <div class="card" style="background:linear-gradient(135deg,#F5F3FF,#FFF);border:1px solid #DDD6FE">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+              <h3 style="margin:0;color:#7C3AED">🤖 AI 의사결정 서포트</h3>
+              <span class="badge b-violet" style="font-size:9px">Claude · 권고 (자동 발송 X)</span>
+            </div>
+            <div class="small muted mb">증상 + 과거 케이스 1,420건 + 보증 데이터 기반 분석</div>
+
+            <div style="background:#FFF;border:1px solid #E2E8F0;border-radius:7px;padding:10px;margin-bottom:8px">
+              <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-bottom:4px">📊 유사 케이스 분석</div>
+              <div class="small">WE-300 + 좌측 무음 = 동일 증상 <strong>76건</strong> · 평균 처리 <strong>2.8일</strong> · 처리 결과:
+                <div style="display:flex;gap:4px;margin-top:5px">
+                  <div style="flex:7;padding:3px 6px;background:#3B82F6;color:#FFF;font-size:10px;text-align:center;border-radius:3px">수리 70%</div>
+                  <div style="flex:2;padding:3px 6px;background:#10B981;color:#FFF;font-size:10px;text-align:center;border-radius:3px">교환 18%</div>
+                  <div style="flex:1;padding:3px 6px;background:#F59E0B;color:#FFF;font-size:10px;text-align:center;border-radius:3px">반품 12%</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#FFF;border:1px solid #E2E8F0;border-radius:7px;padding:10px;margin-bottom:8px">
+              <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-bottom:4px">💡 추천 처리</div>
+              <div class="small"><strong>수리 (드라이버 유닛 교체)</strong></div>
+              <div class="small muted">근거: 보증 기간 내(331일 남음) · 과거 동일 케이스 70%가 수리 · 부품 재고 있음 · 본사 보상 가능</div>
+              <div style="display:flex;gap:5px;margin-top:6px">
+                <button class="btn btn-primary btn-sm" style="flex:1;background:linear-gradient(135deg,#8B5CF6,#3B82F6)">✓ 추천 적용</button>
+                <button class="btn btn-secondary btn-sm">다시 분석</button>
+              </div>
+            </div>
+
+            <div style="background:#FFF;border:1px solid #E2E8F0;border-radius:7px;padding:10px;margin-bottom:8px">
+              <div style="font-size:11px;color:#7C3AED;font-weight:700;margin-bottom:4px">✉ 답변 초안</div>
+              <div class="small" style="background:#F8FAFC;border-radius:5px;padding:8px;line-height:1.5">"안녕하세요 김민수님, A/S 접수가 정상 처리되었습니다. 제품 진단 결과 좌측 드라이버 유닛의 단선으로 확인되어, 부품 교체 수리를 진행할 예정입니다. 예상 완료일은 04-30..."</div>
+              <div style="display:flex;gap:5px;margin-top:6px">
+                <button class="btn btn-secondary btn-sm" style="flex:1">📧 사용</button>
+                <button class="btn btn-secondary btn-sm" style="flex:1">✏ 편집</button>
+              </div>
+            </div>
+
+            <div class="note note-amber">⚠ AI 추천은 <strong>참고용</strong>. 최종 결정은 담당자가 합니다. 자동 발송 절대 금지.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 5: A/S 현황 대시보드 ============ -->
+    <section class="page" data-page="5">
+      <div class="page-header">
+        <div><h1>📊 A/S 현황 대시보드</h1><p class="desc">실시간 운영 현황판 · 30초마다 자동 갱신</p></div>
+        <div class="actions">
+          <select><option>최근 7일</option><option>오늘</option><option>최근 30일</option></select>
+          <select><option>전체 담당자</option></select>
+          <select><option>전체 브랜드</option><option>GT Gear</option><option>TOBE</option></select>
+          <button class="btn btn-secondary">🔄 새로고침</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-amber"><div class="label">접수 대기</div><div class="num amber">23</div><div class="delta dn">↑ 5</div></div>
+        <div class="kpi accent-blue"><div class="label">진행중</div><div class="num">47</div><div class="delta">→ 0</div></div>
+        <div class="kpi accent-violet"><div class="label">출고 대기</div><div class="num" style="color:#8B5CF6">12</div><div class="delta up">↓ 3</div></div>
+        <div class="kpi accent-green"><div class="label">금일 완료</div><div class="num green">8</div><div class="delta up">↑ 2</div></div>
+        <div class="kpi accent-red"><div class="label">SLA 초과</div><div class="num red">4</div><div class="delta dn">⚠ 즉시 조치</div></div>
+        <div class="kpi accent-cyan"><div class="label">평균 해결</div><div class="num">3.1<small>일</small></div><div class="delta up">↓ 0.4</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+        <div class="card">
+          <h3>처리유형 분포</h3>
+          <div style="display:flex;align-items:center;gap:14px">
+            <div class="donut" style="background:conic-gradient(#3B82F6 0 45%,#10B981 45% 70%,#F59E0B 70% 88%,#94A3B8 88% 100%)"></div>
+            <div style="font-size:11.5px;line-height:1.9">
+              <div><span style="display:inline-block;width:9px;height:9px;background:#3B82F6"></span> 수리 <strong>45%</strong></div>
+              <div><span style="display:inline-block;width:9px;height:9px;background:#10B981"></span> 교환 <strong>25%</strong></div>
+              <div><span style="display:inline-block;width:9px;height:9px;background:#F59E0B"></span> 반품 <strong>18%</strong></div>
+              <div><span style="display:inline-block;width:9px;height:9px;background:#94A3B8"></span> 기타 <strong>12%</strong></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>담당자별 진행 (스택바)</h3>
+          <div class="bar-h"><span class="lbl">박수리</span><div class="track"><div class="fill" style="width:50%;background:#3B82F6;float:left;height:14px"></div><div class="fill" style="width:25%;background:#F59E0B;float:left;height:14px"></div><div class="fill" style="width:25%;background:#94A3B8;float:left;height:14px"></div></div><span class="val">12</span></div>
+          <div class="bar-h"><span class="lbl">김기술</span><div class="track"><div class="fill" style="width:60%;background:#3B82F6;float:left;height:14px"></div><div class="fill" style="width:30%;background:#F59E0B;float:left;height:14px"></div><div class="fill" style="width:10%;background:#94A3B8;float:left;height:14px"></div></div><span class="val">15</span></div>
+          <div class="bar-h"><span class="lbl">이정비</span><div class="track"><div class="fill" style="width:75%;background:#3B82F6;float:left;height:14px"></div><div class="fill" style="width:25%;background:#F59E0B;float:left;height:14px"></div></div><span class="val">8</span></div>
+          <div class="bar-h"><span class="lbl">최기사</span><div class="track"><div class="fill" style="width:40%;background:#3B82F6;float:left;height:14px"></div><div class="fill" style="width:35%;background:#F59E0B;float:left;height:14px"></div><div class="fill" style="width:25%;background:#94A3B8;float:left;height:14px"></div></div><span class="val">10</span></div>
+          <div style="font-size:10.5px;margin-top:6px;display:flex;gap:10px;color:#64748B"><span><span style="display:inline-block;width:8px;height:8px;background:#3B82F6"></span> 진행</span><span><span style="display:inline-block;width:8px;height:8px;background:#F59E0B"></span> 대기</span><span><span style="display:inline-block;width:8px;height:8px;background:#94A3B8"></span> 보류</span></div>
+        </div>
+        <div class="card">
+          <h3>주간 트렌드</h3>
+          <svg viewBox="0 0 200 90" style="width:100%;height:90px">
+            <polyline points="0,60 33,45 66,30 99,38 132,25 165,32 198,18" fill="none" stroke="#3B82F6" stroke-width="2.5"/>
+            <polyline points="0,75 33,68 66,55 99,50 132,45 165,40 198,30" fill="none" stroke="#10B981" stroke-width="2.5" stroke-dasharray="4,3"/>
+          </svg>
+          <div style="display:flex;justify-content:space-around;font-size:10.5px;color:#64748B"><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span></div>
+          <div style="font-size:11px;margin-top:6px;display:flex;gap:12px"><span style="color:#3B82F6">━ 접수</span><span style="color:#10B981">┄ 완료</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0;color:#991B1B">⚠ 정체 티켓 Top 5</h3>
+          <span class="small muted">행 클릭 → 액션 큐 이동</span>
+        </div>
+        <table>
+          <tr><th>A/S#</th><th>고객</th><th>경과</th><th>정체 구간</th><th>담당</th><th>마지막 액션</th><th>액션</th></tr>
+          <tr class="error"><td class="strong red">AS-2501</td><td>한서윤</td><td class="strong red">28일</td><td>작업→완료</td><td>김기술</td><td>04-01 작업 시작</td><td><button class="btn btn-danger btn-sm">상세 →</button></td></tr>
+          <tr class="warn"><td class="strong amber">AS-2589</td><td>박지영</td><td class="amber">14일</td><td>배정→작업</td><td>박수리</td><td>04-14 배정</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td></tr>
+          <tr><td>AS-2611</td><td>정하늘</td><td>9일</td><td>회수 미접수</td><td>이정비</td><td>04-19 회수 요청</td><td><button class="btn btn-secondary btn-sm">상세 →</button></td></tr>
+        </table>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 6: A/S 비용 추적 ============ -->
+    <section class="page" data-page="6">
+      <div class="page-header">
+        <div><h1>💰 A/S 비용 추적</h1><p class="desc">3축 비용 (지출 / 수납 / 본사 보상) · 미승인 5건 대기</p></div>
+        <div class="actions"><button class="btn btn-secondary">⬇ Excel</button><button class="btn btn-primary">+ 비용 입력</button></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-red"><div class="label">우리 지출</div><div class="num red">-2,340,000</div><div class="delta">156건</div></div>
+        <div class="kpi accent-green"><div class="label">고객 수납</div><div class="num green">+1,890,000</div><div class="delta">98건</div></div>
+        <div class="kpi accent-blue"><div class="label">본사 보상</div><div class="num blue">+780,000</div><div class="delta">42건</div></div>
+        <div class="kpi"><div class="label">순비용</div><div class="num">+330,000</div><div class="delta up">전월 대비 ↓ 12%</div></div>
+      </div>
+
+      <div class="card mb">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <select><option>최근 30일</option></select>
+          <select><option>전체 유형</option><option>지출</option><option>수납</option><option>보상</option></select>
+          <select><option>전체 담당자</option></select>
+          <select><option>승인 상태</option><option>대기 (5)</option><option>승인</option><option>반려</option></select>
+          <button class="btn btn-primary">🔍 조회</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px">
+        <div>
+          <div class="card mb">
+            <h3>월별 집계</h3>
+            <table>
+              <tr><th>월</th><th class="red">지출</th><th class="green">수납</th><th class="blue">보상</th><th>순비용</th></tr>
+              <tr class="highlight"><td><strong>2026-04</strong></td><td class="red">-2,340K</td><td class="green">+1,890K</td><td class="blue">+780K</td><td class="strong">+330K</td></tr>
+              <tr><td>2026-03</td><td class="red">-2,650K</td><td class="green">+1,720K</td><td class="blue">+550K</td><td class="strong">-380K</td></tr>
+              <tr><td>2026-02</td><td class="red">-1,980K</td><td class="green">+1,640K</td><td class="blue">+340K</td><td class="strong">0</td></tr>
+              <tr><td>2026-01</td><td class="red">-2,210K</td><td class="green">+1,580K</td><td class="blue">+480K</td><td class="strong">-150K</td></tr>
+            </table>
+          </div>
+          <div class="card">
+            <h3>티켓별 비용 (대기 우선)</h3>
+            <table>
+              <tr><th>A/S#</th><th>고객</th><th class="red">지출</th><th class="green">수납</th><th class="blue">보상</th><th>순</th><th>상태</th><th></th></tr>
+              <tr class="warn"><td>AS-2641</td><td>김민수</td><td class="red">-45,000</td><td class="green">+30,000</td><td class="blue">+20,000</td><td class="strong">+5,000</td><td><span class="badge b-amber">대기</span></td><td><button class="btn btn-success btn-sm">승인</button></td></tr>
+              <tr class="warn"><td>AS-2635</td><td>이준혁</td><td class="red">-78,000</td><td>—</td><td class="blue">+78,000</td><td class="strong">0</td><td><span class="badge b-amber">대기</span></td><td><button class="btn btn-success btn-sm">승인</button></td></tr>
+              <tr><td>AS-2638</td><td>박지영</td><td class="red">-12,000</td><td class="green">+12,000</td><td>—</td><td class="strong">0</td><td><span class="badge b-green">승인</span></td><td>—</td></tr>
+              <tr><td>AS-2630</td><td>최은지</td><td class="red">-32,000</td><td class="green">+25,000</td><td class="blue">+15,000</td><td class="strong">+8,000</td><td><span class="badge b-green">승인</span></td><td>—</td></tr>
+            </table>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><strong>비용 입력 — AS-2641</strong><span class="close">✕</span></div>
+          <label class="lbl">비용 축</label>
+          <div style="display:flex;gap:5px"><button class="btn btn-danger" style="flex:1">지출</button><button class="btn btn-secondary" style="flex:1">수납</button><button class="btn btn-secondary" style="flex:1">보상</button></div>
+          <label class="lbl mt">항목</label>
+          <select style="width:100%"><option>부품 — 드라이버 유닛</option><option>택배비</option><option>리퍼브 처리비</option></select>
+          <label class="lbl mt">금액 (원)</label>
+          <input value="15,000" style="width:100%;font-family:monospace">
+          <label class="lbl mt">비고</label>
+          <textarea style="width:100%;height:50px;resize:none">좌측 드라이버 단선 교체</textarea>
+          <label class="lbl mt">증빙 파일</label>
+          <div style="border:2px dashed #CBD5E1;border-radius:7px;padding:14px;text-align:center;color:#94A3B8">📎 영수증.jpg <span class="small">(클릭 또는 드래그)</span></div>
+          <div style="display:flex;gap:6px;margin-top:14px"><button class="btn btn-secondary" style="flex:1">취소</button><button class="btn btn-primary" style="flex:1">저장</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 7: A/S 출고 관리 ============ -->
+    <section class="page" data-page="7">
+      <div class="page-header">
+        <div><h1>📦 A/S 출고 관리</h1><p class="desc">출고 대기 → 송장 등록 → CX 인계 흐름</p></div>
+        <div class="actions"><button class="btn btn-secondary">📤 일괄 송장 업로드</button><button class="btn btn-primary">+ 출고 등록</button></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">출고 대기 <span class="badge b-amber">12</span></div>
+        <div class="tab">배송 중 <span class="badge b-blue">38</span></div>
+        <div class="tab">CX 인계 대기 <span class="badge b-red">3</span></div>
+        <div class="tab">완료 (847)</div>
+      </div>
+
+      <div class="card mb">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input placeholder="A/S# / 송장번호 / 수신인" style="flex:1;min-width:200px">
+          <select><option>전체 택배사</option><option>CJ대한통운</option><option>한진택배</option><option>로젠택배</option></select>
+          <select><option>전체 유형</option><option>수리완료</option><option>교환신품</option><option>리퍼브</option></select>
+          <button class="btn btn-primary">🔍 검색</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">
+        <div class="card">
+          <table>
+            <tr><th><input type="checkbox"></th><th>A/S#</th><th>고객</th><th>제품</th><th>유형</th><th>택배</th><th>송장</th><th>상태</th><th>CX</th></tr>
+            <tr class="highlight"><td><input type="checkbox"></td><td>AS-2641</td><td>김민수</td><td>WE-300</td><td>수리완료</td><td>CJ</td><td class="muted">미입력</td><td><span class="badge b-amber">대기</span></td><td>—</td></tr>
+            <tr><td><input type="checkbox"></td><td>AS-2635</td><td>이준혁</td><td>CC-100</td><td>교환신품</td><td>한진</td><td><code>5012-3456-7890</code></td><td><span class="badge b-blue">배송중</span></td><td>✓</td></tr>
+            <tr class="error"><td><input type="checkbox"></td><td>AS-2630</td><td>박지영</td><td>BS-200</td><td>수리완료</td><td>로젠</td><td><code>4501-2233-4400</code></td><td><span class="badge b-green">배달완료</span></td><td><span class="badge b-red">미인계</span></td></tr>
+            <tr><td><input type="checkbox"></td><td>AS-2628</td><td>최은지</td><td>WE-300</td><td>리퍼브</td><td>CJ</td><td><code>1234-5678-9012</code></td><td><span class="badge b-blue">배송중</span></td><td>✓</td></tr>
+            <tr><td><input type="checkbox"></td><td>AS-2625</td><td>송민재</td><td>WE-200</td><td>수리완료</td><td>CJ</td><td><code>2345-6789-0123</code></td><td><span class="badge b-green">배달완료</span></td><td>✓</td></tr>
+          </table>
+          <div class="flow mt" style="justify-content:center">
+            <span class="flow-step">수리/교환 완료</span><span class="flow-arrow">→</span>
+            <span class="flow-step">수신인</span><span class="flow-arrow">→</span>
+            <span class="flow-step">택배사</span><span class="flow-arrow">→</span>
+            <span class="flow-step">송장</span><span class="flow-arrow">→</span>
+            <span class="flow-step" style="background:#DCFCE7;border-color:#86EFAC;color:#166534">CX 인계</span>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><strong>출고 등록 — AS-2641</strong><span class="close">✕</span></div>
+          <label class="lbl">수신인 (자동 채움)</label>
+          <input value="김민수 / 010-1234-5678" style="width:100%;background:#F0FDF4">
+          <label class="lbl mt">배송 주소</label>
+          <textarea style="width:100%;height:55px;resize:none;background:#F0FDF4">서울 강남구 테헤란로 123 (역삼동) 401호</textarea>
+          <label class="lbl mt">출고 유형</label>
+          <select style="width:100%"><option>수리 완료품</option><option>교환 신품</option><option>리퍼브 출고</option></select>
+          <div style="display:grid;grid-template-columns:1fr 1.3fr;gap:8px;margin-top:10px">
+            <div><label class="lbl">택배사</label><select style="width:100%"><option>CJ대한통운</option><option>한진</option><option>로젠</option></select></div>
+            <div><label class="lbl">송장번호</label><input placeholder="자동 발번 또는 입력" style="width:100%"></div>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px"><input type="checkbox" checked> CX 인계 후 종료 알림 발송</label>
+          <div class="note note-amber mt">📋 발송 시 자동 트리거: <strong>EMAIL_SENT</strong> + <strong>SMS_SENT</strong> + <strong>SHIPMENT_CREATED</strong></div>
+          <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-secondary" style="flex:1">취소</button><button class="btn btn-primary" style="flex:1">출고 등록</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 8: 회수 관리 ============ -->
+    <section class="page" data-page="8">
+      <div class="page-header">
+        <div><h1>🚚 회수 관리</h1><p class="desc">단기 접수 직접 기사 배정 + 장기는 일반 택배 회수</p></div>
+        <div class="actions"><button class="btn btn-secondary">기사 관리</button><button class="btn btn-primary">+ 회수 요청</button></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-red"><div class="label">미회수</div><div class="num red">14</div><div class="delta dn">7일+ 5건</div></div>
+        <div class="kpi accent-amber"><div class="label">금일 배정</div><div class="num amber">5</div></div>
+        <div class="kpi accent-green"><div class="label">금일 완료</div><div class="num green">7</div></div>
+        <div class="kpi"><div class="label">평균 회수일</div><div class="num">2.4<small>일</small></div></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">회수 대기 <span class="badge b-amber">8</span></div>
+        <div class="tab">기사 배정 <span class="badge b-blue">5</span></div>
+        <div class="tab">미회수 <span class="badge b-red">14</span></div>
+        <div class="tab">완료 (1,204)</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">
+        <div>
+          <div class="card mb">
+            <table>
+              <tr><th>회수#</th><th>A/S#</th><th>고객</th><th>제품</th><th>접수</th><th>경과</th><th>방식</th><th>기사</th><th>상태</th></tr>
+              <tr class="error"><td>RT-415</td><td>AS-2645</td><td>이수진</td><td>WE-300</td><td>04-26</td><td class="strong red">2일</td><td><span class="badge b-blue">기사 직접</span></td><td>—</td><td><span class="badge b-red">미배정</span></td></tr>
+              <tr class="warn"><td>RT-412</td><td>AS-2640</td><td>최은지</td><td>WE-300</td><td>04-25</td><td class="amber">3일</td><td><span class="badge b-blue">기사 직접</span></td><td>홍기사</td><td><span class="badge b-amber">배정</span></td></tr>
+              <tr><td>RT-410</td><td>AS-2638</td><td>박지영</td><td>BS-200</td><td>04-23</td><td>5일</td><td><span class="badge b-blue">기사 직접</span></td><td>정기사</td><td><span class="badge b-green">수거완료</span></td></tr>
+              <tr><td>RT-408</td><td>AS-2636</td><td>송민재</td><td>BS-200</td><td>04-20</td><td class="muted">8일</td><td><span class="badge b-slate">택배</span></td><td>—</td><td><span class="badge b-green">완료</span></td></tr>
+            </table>
+          </div>
+          <div class="card">
+            <h3>기사별 부하</h3>
+            <div class="bar-h"><span class="lbl">홍기사</span><div class="track"><div class="fill" style="width:80%;background:#EF4444"></div></div><span class="val red">8/10</span></div>
+            <div class="bar-h"><span class="lbl">정기사</span><div class="track"><div class="fill" style="width:50%;background:#F59E0B"></div></div><span class="val amber">5/10</span></div>
+            <div class="bar-h"><span class="lbl">윤기사</span><div class="track"><div class="fill" style="width:30%;background:#10B981"></div></div><span class="val green">3/10</span></div>
+            <div class="bar-h"><span class="lbl">최기사</span><div class="track"><div class="fill" style="width:60%;background:#F59E0B"></div></div><span class="val amber">6/10</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><strong>회수 요청 — AS-2645</strong><span class="close">✕</span></div>
+          <label class="lbl">고객</label>
+          <input value="이수진 / 010-3344-5566" style="width:100%;background:#F0FDF4">
+          <label class="lbl mt">제품</label>
+          <input value="WE-300 이어폰 Pro × 1" style="width:100%">
+          <label class="lbl mt">회수 방식</label>
+          <div style="display:flex;gap:5px"><button class="btn btn-primary" style="flex:1">기사 직접</button><button class="btn btn-secondary" style="flex:1">일반 택배</button></div>
+          <label class="lbl mt">기사 (부하 기준 추천)</label>
+          <select style="width:100%"><option>윤기사 (3/10) ← 추천</option><option>정기사 (5/10)</option><option>최기사 (6/10)</option><option>홍기사 (8/10) ⚠</option></select>
+          <label class="lbl mt">희망 수거일 / 시간</label>
+          <input value="2026-04-29 (목) 오후" style="width:100%">
+          <label class="lbl mt">비고</label>
+          <textarea style="width:100%;height:40px;resize:none">구매 5일차 — 단기 접수</textarea>
+          <div class="note note-blue mt">📱 저장 시 기사에게 SMS 자동 발송 + RECALL_REQUESTED 이벤트 기록</div>
+          <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-secondary" style="flex:1">취소</button><button class="btn btn-primary" style="flex:1">요청 저장</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 9: 정품등록 ============ -->
+    <section class="page" data-page="9">
+      <div class="page-header">
+        <div><h1>🏷 정품등록 · 시리얼 · 쿠폰</h1><p class="desc">시리얼 검증 · 보증 만료 추적 · 위변조 블랙리스트</p></div>
+        <div class="actions"><button class="btn btn-secondary">📋 일괄 등록</button><button class="btn btn-primary">+ 신규 등록</button></div>
+      </div>
+
+      <div class="card mb" style="background:linear-gradient(135deg,#EFF6FF,#FFF);border-left:3px solid #3B82F6">
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="font-size:20px">🔍</div>
+          <div style="flex:1"><h3 style="margin:0">시리얼 빠른 검증</h3><div class="small muted">시리얼 입력 → 정상 / 중복 / 위변조 즉시 판별</div></div>
+          <input value="WE300-2026-00412" style="flex:1;max-width:280px;font-family:monospace">
+          <button class="btn btn-primary">검증</button>
+        </div>
+        <div style="margin-top:10px;padding:8px 12px;background:#DCFCE7;border-radius:7px;color:#166534;font-size:12px">✅ 정상 시리얼 · 미등록 · 보증 1년 가능 · WE-300 / 2026년 3월 생산분</div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">정품등록 (12,840)</div>
+        <div class="tab">시리얼 관리</div>
+        <div class="tab">쿠폰 발급 이력</div>
+        <div class="tab">블랙리스트 (24)</div>
+      </div>
+
+      <div class="card mb">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input placeholder="시리얼 / 모델 / 전화번호" style="flex:1;min-width:240px">
+          <select><option>전체 상태</option><option>유효</option><option>만료 임박</option><option>만료</option></select>
+          <select><option>전체 모델</option></select>
+          <button class="btn btn-primary">🔍 검색</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">
+        <div class="card">
+          <table>
+            <tr><th>시리얼</th><th>모델</th><th>고객</th><th>등록</th><th>보증만료</th><th>상태</th><th>쿠폰</th></tr>
+            <tr class="highlight"><td><code>WE300-2026-00412</code></td><td>WE-300</td><td>김민수</td><td>2026-03-25</td><td>2027-03-25</td><td><span class="badge b-green">유효</span></td><td><span class="badge b-blue">미사용 1</span></td></tr>
+            <tr><td><code>BS200-2025-00821</code></td><td>BS-200</td><td>이준혁</td><td>2025-09-12</td><td>2026-09-12</td><td><span class="badge b-amber">만료 임박</span></td><td>—</td></tr>
+            <tr><td><code>BS200-2024-01205</code></td><td>BS-200</td><td>박지영</td><td>2024-11-10</td><td>2025-11-10</td><td><span class="badge b-red">만료</span></td><td>—</td></tr>
+            <tr class="error"><td><code>WE300-2026-00412</code></td><td>WE-300</td><td class="red">(중복!)</td><td>—</td><td>—</td><td><span class="badge b-red">위변조 의심</span></td><td>—</td></tr>
+            <tr><td><code>CC100-2025-02014</code></td><td>CC-100</td><td>정하늘</td><td>2025-12-08</td><td>2026-12-08</td><td><span class="badge b-green">유효</span></td><td><span class="badge b-slate">사용됨</span></td></tr>
+          </table>
+        </div>
+        <div>
+          <div class="panel mb">
+            <div class="ph"><strong>등록 상세</strong><span class="close">✕</span></div>
+            <label class="lbl">시리얼</label>
+            <div style="font-family:monospace;font-weight:600">WE300-2026-00412</div>
+            <label class="lbl mt">고객</label>
+            <div>김민수 · 010-1234-5678</div>
+            <label class="lbl mt">제품 / 구매일</label>
+            <div>WE-300 이어폰 Pro · 2026-03-22</div>
+            <label class="lbl mt">보증 기간</label>
+            <div>~2027-03-25 (남은 기간 <span class="strong green">331일</span>)</div>
+            <label class="lbl mt">발급 쿠폰</label>
+            <div><span class="badge b-blue">정품등록 5%</span> 미사용 · ~2026-12-31</div>
+            <div style="display:flex;gap:5px;margin-top:14px;flex-wrap:wrap">
+              <button class="btn btn-primary btn-sm">쿠폰 재발급</button>
+              <button class="btn btn-secondary btn-sm">보증 연장</button>
+              <button class="btn btn-danger btn-sm">⛔ 블랙리스트</button>
+            </div>
+          </div>
+          <div class="note note-red">⚠ <strong>위변조 탐지:</strong> 동일 시리얼 2회 등록 시 자동 알림 → 후행 등록 자동 반려</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 10: 교환·반품 ============ -->
+    <section class="page" data-page="10">
+      <div class="page-header">
+        <div><h1>🔄 교환 · 반품 관리</h1><p class="desc">검수 → A/B/C 분기 → 출고 자동 생성 / 환불 트리거</p></div>
+        <div class="actions"><button class="btn btn-primary">+ 신규 접수</button></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">전체 (30)</div>
+        <div class="tab">교환 <span class="badge b-blue">18</span></div>
+        <div class="tab">반품 <span class="badge b-amber">7</span></div>
+        <div class="tab">검수 대기 <span class="badge b-red">5</span></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">
+        <div class="card">
+          <table>
+            <tr><th>접수#</th><th>고객</th><th>제품</th><th>유형</th><th>검수</th><th>처리분기</th><th>상태</th><th>액션</th></tr>
+            <tr class="highlight"><td>EX-082</td><td>이준혁</td><td>CC-100</td><td><span class="badge b-blue">교환</span></td><td><span class="badge b-green">A급</span></td><td>재고 재등록</td><td>검수완료</td><td><button class="btn btn-primary btn-sm">출고 연결</button></td></tr>
+            <tr><td>RT-081</td><td>정하늘</td><td>WE-200</td><td><span class="badge b-amber">반품</span></td><td><span class="badge b-amber">B급</span></td><td>리퍼브</td><td>수리중</td><td>—</td></tr>
+            <tr><td>RT-079</td><td>강서현</td><td>BS-100</td><td><span class="badge b-amber">반품</span></td><td><span class="badge b-red">C급</span></td><td>부품/폐기</td><td>폐기대기</td><td><button class="btn btn-secondary btn-sm">폐기 확인</button></td></tr>
+            <tr class="warn"><td>EX-083</td><td>송민재</td><td>WE-300</td><td><span class="badge b-blue">교환</span></td><td>—</td><td class="muted">분기 미선택</td><td><span class="badge b-amber">검수 대기</span></td><td><button class="btn btn-primary btn-sm">검수 시작</button></td></tr>
+          </table>
+          <div class="flow mt" style="justify-content:center;flex-wrap:wrap">
+            <span class="flow-step">회수 도착</span><span class="flow-arrow">→</span>
+            <span class="flow-step strong">검수 (A/B/C)</span><span class="flow-arrow">→</span>
+            <span class="flow-step" style="background:#DCFCE7;border-color:#86EFAC;color:#166534">A: 재고</span>
+            <span class="muted">/</span>
+            <span class="flow-step" style="background:#FEF3C7;border-color:#FDE68A;color:#92400E">B: 리퍼브</span>
+            <span class="muted">/</span>
+            <span class="flow-step" style="background:#FEE2E2;border-color:#FECACA;color:#991B1B">C: 폐기</span>
+            <span class="flow-arrow">→</span>
+            <span class="flow-step" style="background:#DBEAFE;border-color:#93C5FD">출고/환불 자동</span>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="ph"><strong>검수 결과 — EX-083</strong><span class="close">✕</span></div>
+          <label class="lbl">검수 등급 *필수</label>
+          <div style="display:flex;gap:5px"><button class="btn btn-success" style="flex:1">A급 정상</button><button class="btn btn-secondary" style="flex:1">B급</button><button class="btn btn-secondary" style="flex:1">C급</button></div>
+          <label class="lbl mt">처리 분기 *필수</label>
+          <select style="width:100%"><option>재고 재등록 (자동 출고 생성)</option><option>리퍼브 처리</option><option>부품 회수 / 폐기</option></select>
+          <label class="lbl mt">검수 메모</label>
+          <textarea style="width:100%;height:55px;resize:none">외관 정상, 미사용 새제품으로 판단됨</textarea>
+          <label class="lbl mt">검수 사진 (3 / 5)</label>
+          <div style="display:flex;gap:5px">
+            <div style="width:46px;height:46px;background:linear-gradient(135deg,#CBD5E1,#94A3B8);border-radius:5px"></div>
+            <div style="width:46px;height:46px;background:linear-gradient(135deg,#94A3B8,#64748B);border-radius:5px"></div>
+            <div style="width:46px;height:46px;background:linear-gradient(135deg,#64748B,#475569);border-radius:5px"></div>
+            <div style="width:46px;height:46px;background:#F1F5F9;border:2px dashed #CBD5E1;border-radius:5px;display:flex;align-items:center;justify-content:center;color:#94A3B8;font-size:18px">+</div>
+          </div>
+          <div class="note note-blue mt">💡 저장 시: A→재고 입고 + 교환 출고 자동 생성, B→리퍼브 큐, C→폐기 큐</div>
+          <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-secondary" style="flex:1">취소</button><button class="btn btn-primary" style="flex:1">처리 확정</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 11: 메일·SMS 로그 ============ -->
+    <section class="page" data-page="11">
+      <div class="page-header">
+        <div><h1>📧 이메일 · SMS 로그</h1><p class="desc">MailLog 통합 · 채널 탭 + 실패 큐 + 재발송</p></div>
+        <div class="actions"><button class="btn btn-secondary">📤 Excel</button><button class="btn btn-danger">⚠ 실패 8건 일괄 재발송</button></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi"><div class="label">전체 발송</div><div class="num">2,648,926</div></div>
+        <div class="kpi accent-green"><div class="label">성공률</div><div class="num green">98.2%</div></div>
+        <div class="kpi accent-red"><div class="label">실패</div><div class="num red">8</div></div>
+        <div class="kpi accent-amber"><div class="label">대기</div><div class="num amber">3</div></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">전체</div>
+        <div class="tab">📧 이메일</div>
+        <div class="tab">📱 SMS</div>
+        <div class="tab">💬 알림톡</div>
+        <div class="tab" style="color:#EF4444">❌ 실패만 (8)</div>
+      </div>
+
+      <div class="card mb">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input placeholder="수신자 / A/S# / 키워드" style="flex:1;min-width:200px">
+          <select><option>전체 상태</option><option>성공</option><option>실패</option></select>
+          <select><option>최근 7일</option></select>
+          <button class="btn btn-primary">🔍 검색</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:14px">
+        <div class="card">
+          <table>
+            <tr><th>일시</th><th>채널</th><th>수신자</th><th>제목</th><th>A/S</th><th>발송자</th><th>상태</th></tr>
+            <tr><td>04-28 15:00</td><td><span class="badge b-slate">📧</span></td><td>minsu@email.com</td><td>수리 완료 안내</td><td>AS-2641</td><td>박수리</td><td><span class="badge b-green">성공</span></td></tr>
+            <tr><td>04-28 10:15</td><td><span class="badge b-blue">💬</span></td><td>010-1234-5678</td><td>A/S 접수 안내</td><td>AS-2641</td><td>시스템</td><td><span class="badge b-green">성공</span></td></tr>
+            <tr class="error"><td>04-27 18:30</td><td><span class="badge b-amber">📱</span></td><td>010-9876-5432</td><td>배송 출발 안내</td><td>AS-2638</td><td>시스템</td><td><span class="badge b-red">실패</span></td></tr>
+            <tr><td>04-27 14:22</td><td><span class="badge b-blue">💬</span></td><td>010-5555-1234</td><td>회수 일정 안내</td><td>AS-2640</td><td>이수진</td><td><span class="badge b-green">성공</span></td></tr>
+            <tr><td>04-26 09:48</td><td><span class="badge b-slate">📧</span></td><td>jh@email.com</td><td>견적 안내</td><td>AS-2635</td><td>박수리</td><td><span class="badge b-green">성공</span></td></tr>
+          </table>
+          <div style="text-align:right;margin-top:8px;font-size:11px;color:#94A3B8">« 1 2 3 ... 264,892 »</div>
+        </div>
+        <div class="panel" style="border-left-color:#EF4444">
+          <div class="ph"><strong style="color:#991B1B">⚠ 재발송 — 실패 건</strong><span class="close">✕</span></div>
+          <label class="lbl">원본 발송 정보</label>
+          <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:7px;padding:10px;line-height:1.6">
+            <div class="strong">2026-04-27 18:30</div>
+            <div>📱 SMS · 010-9876-5432</div>
+            <div class="muted small">"[배송 출발] AS-2638 박지영 고객님..."</div>
+          </div>
+          <div class="note note-red mt">실패 사유: <strong>수신 거부 번호</strong> (KT 코드 R-401)</div>
+          <label class="lbl mt">수신자 수정</label>
+          <input value="010-9876-5432" style="width:100%">
+          <label class="lbl mt">채널 변경</label>
+          <select style="width:100%"><option>📱 SMS</option><option>💬 카카오 알림톡</option><option>📧 이메일</option></select>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px"><input type="checkbox" checked> 새 MailLog 생성 (재발송 이력)</label>
+          <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-secondary" style="flex:1">취소</button><button class="btn btn-primary" style="flex:1">재발송</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 12: 티켓 배분 ============ -->
+    <section class="page" data-page="12">
+      <div class="page-header">
+        <div><h1>👥 티켓 배분 · 담당자 관리</h1><p class="desc">팀장 전용 · 자동 배정 토글 ON 시 인입 즉시 자동 분배</p></div>
+        <div class="actions"><button class="btn btn-secondary">📜 배정 이력</button></div>
+      </div>
+
+      <!-- ===== AUTO ASSIGN BIG TOGGLE ===== -->
+      <div class="card mb" style="background:linear-gradient(135deg,#1E40AF,#3B82F6);color:#FFF;border:none">
+        <div style="display:flex;align-items:center;gap:18px">
+          <div style="font-size:34px">⚡</div>
+          <div style="flex:1">
+            <div style="display:flex;align-items:center;gap:10px">
+              <h3 style="margin:0;color:#FFF;font-size:16px">자동 배정 — <span style="color:#86EFAC">ON</span></h3>
+              <span class="badge" style="background:rgba(255,255,255,.2);color:#FFF">실시간</span>
+            </div>
+            <div style="font-size:12px;color:#BFDBFE;margin-top:4px">신규 티켓 인입 시 <strong>즉시 자동 분배</strong> · 모드: <strong>라운드 로빈 (부하 균형)</strong> · 4명 활성</div>
+          </div>
+          <!-- Toggle Switch -->
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:11px;color:#BFDBFE">OFF</span>
+            <div style="position:relative;width:64px;height:32px;background:#10B981;border-radius:16px;cursor:pointer;box-shadow:inset 0 1px 3px rgba(0,0,0,.2)">
+              <div style="position:absolute;top:3px;right:3px;width:26px;height:26px;background:#FFF;border-radius:50%;box-shadow:0 2px 6px rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;font-size:14px;color:#10B981">✓</div>
+            </div>
+            <span style="font-size:11px;color:#FFF;font-weight:700">ON</span>
+          </div>
+        </div>
+        <div style="margin-top:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+          <div style="background:rgba(255,255,255,.1);padding:10px;border-radius:7px">
+            <div style="font-size:10.5px;color:#BFDBFE">금일 자동 배정</div>
+            <div style="font-size:18px;font-weight:800">37건</div>
+          </div>
+          <div style="background:rgba(255,255,255,.1);padding:10px;border-radius:7px">
+            <div style="font-size:10.5px;color:#BFDBFE">평균 배정 시간</div>
+            <div style="font-size:18px;font-weight:800">0.8초</div>
+          </div>
+          <div style="background:rgba(255,255,255,.1);padding:10px;border-radius:7px">
+            <div style="font-size:10.5px;color:#BFDBFE">규칙 위반 (스킵)</div>
+            <div style="font-size:18px;font-weight:800">2건</div>
+          </div>
+          <div style="background:rgba(255,255,255,.1);padding:10px;border-radius:7px">
+            <div style="font-size:10.5px;color:#BFDBFE">미배정 잔여</div>
+            <div style="font-size:18px;font-weight:800;color:#FCD34D">5건 ⚠</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:240px 1.4fr 1fr;gap:14px">
+        <div class="card">
+          <h3 style="display:flex;justify-content:space-between">미배정 큐<span class="badge b-red">5</span></h3>
+          <div class="small muted mb">카드를 담당자에게 드래그</div>
+          <div class="drag" style="border-left:3px solid #EF4444">
+            <div style="display:flex;justify-content:space-between"><strong>AS-2645</strong><span class="badge b-red">⚠ 4h+</span></div>
+            <div class="small muted">김민수 · WE-300 · 수리</div>
+          </div>
+          <div class="drag" style="border-left:3px solid #F59E0B">
+            <div style="display:flex;justify-content:space-between"><strong>AS-2644</strong><span class="badge b-amber">2h</span></div>
+            <div class="small muted">박지영 · BS-200 · 교환</div>
+          </div>
+          <div class="drag">
+            <div style="display:flex;justify-content:space-between"><strong>AS-2643</strong><span class="muted small">30분</span></div>
+            <div class="small muted">이준혁 · CC-100 · 반품</div>
+          </div>
+          <div class="drag">
+            <div style="display:flex;justify-content:space-between"><strong>AS-2642</strong><span class="muted small">15분</span></div>
+            <div class="small muted">정하늘 · WE-200</div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>담당자별 현황</h3>
+          <table>
+            <tr><th>담당</th><th>부하</th><th>금주</th><th>평균</th><th>SLA</th><th>응답</th><th>액션</th></tr>
+            <tr><td><strong>박수리</strong></td><td><div style="display:flex;align-items:center;gap:4px"><div style="width:60px;height:8px;background:#F1F5F9;border-radius:2px;overflow:hidden"><div style="width:60%;height:100%;background:#F59E0B"></div></div><span class="small">12/20</span></div></td><td>6</td><td>2.4일</td><td class="red">1</td><td>92%</td><td><button class="btn btn-secondary btn-sm">+1</button></td></tr>
+            <tr><td><strong>김기술</strong></td><td><div style="display:flex;align-items:center;gap:4px"><div style="width:60px;height:8px;background:#F1F5F9;border-radius:2px;overflow:hidden"><div style="width:75%;height:100%;background:#EF4444"></div></div><span class="small">15/20</span></div></td><td>4</td><td>3.1일</td><td class="red">2</td><td>87%</td><td><button class="btn btn-secondary btn-sm">+1</button></td></tr>
+            <tr class="highlight"><td><strong>이정비</strong></td><td><div style="display:flex;align-items:center;gap:4px"><div style="width:60px;height:8px;background:#F1F5F9;border-radius:2px;overflow:hidden"><div style="width:40%;height:100%;background:#10B981"></div></div><span class="small">8/20</span></div></td><td>7</td><td>1.8일</td><td class="green">0</td><td>95%</td><td><button class="btn btn-success btn-sm">+1</button></td></tr>
+            <tr><td><strong>최기술</strong></td><td><div style="display:flex;align-items:center;gap:4px"><div style="width:60px;height:8px;background:#F1F5F9;border-radius:2px;overflow:hidden"><div style="width:50%;height:100%;background:#F59E0B"></div></div><span class="small">10/20</span></div></td><td>5</td><td>2.7일</td><td class="amber">1</td><td>89%</td><td><button class="btn btn-secondary btn-sm">+1</button></td></tr>
+            <tr><td><strong>홍수리</strong></td><td><div style="display:flex;align-items:center;gap:4px"><div style="width:60px;height:8px;background:#F1F5F9;border-radius:2px;overflow:hidden"><div style="width:55%;height:100%;background:#F59E0B"></div></div><span class="small">11/20</span></div></td><td>3</td><td>2.9일</td><td class="green">0</td><td>91%</td><td><button class="btn btn-secondary btn-sm">+1</button></td></tr>
+          </table>
+        </div>
+        <div class="panel" style="border-left-color:#8B5CF6">
+          <div class="ph"><strong>자동 배정 풀 (크루 지정)</strong><span class="badge b-violet">5명 활성</span></div>
+          <div class="small muted mb">배정 풀에 포함된 크루만 자동 배정 대상. 토글로 즉시 ON/OFF.</div>
+
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:7px">
+              <div><strong>박수리</strong> <span class="small muted">A/S · 부하 12/20</span></div>
+              <div style="position:relative;width:38px;height:20px;background:#10B981;border-radius:10px;cursor:pointer">
+                <div style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:#FFF;border-radius:50%"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:7px">
+              <div><strong>김기술</strong> <span class="small muted">A/S · 부하 15/20 ⚠</span></div>
+              <div style="position:relative;width:38px;height:20px;background:#10B981;border-radius:10px;cursor:pointer">
+                <div style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:#FFF;border-radius:50%"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:7px">
+              <div><strong>이정비</strong> <span class="small muted">A/S · 부하 8/20</span></div>
+              <div style="position:relative;width:38px;height:20px;background:#10B981;border-radius:10px;cursor:pointer">
+                <div style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:#FFF;border-radius:50%"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:7px">
+              <div><strong>최기술</strong> <span class="small muted">A/S · 부하 10/20</span></div>
+              <div style="position:relative;width:38px;height:20px;background:#10B981;border-radius:10px;cursor:pointer">
+                <div style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:#FFF;border-radius:50%"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F0FDF4;border:1px solid #86EFAC;border-radius:7px">
+              <div><strong>홍수리</strong> <span class="small muted">A/S · 부하 11/20</span></div>
+              <div style="position:relative;width:38px;height:20px;background:#10B981;border-radius:10px;cursor:pointer">
+                <div style="position:absolute;top:2px;right:2px;width:16px;height:16px;background:#FFF;border-radius:50%"></div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:7px;opacity:.7">
+              <div><strong>윤기사</strong> <span class="small muted">회수 · 휴무 중</span></div>
+              <div style="position:relative;width:38px;height:20px;background:#CBD5E1;border-radius:10px;cursor:pointer">
+                <div style="position:absolute;top:2px;left:2px;width:16px;height:16px;background:#FFF;border-radius:50%"></div>
+              </div>
+            </div>
+          </div>
+
+          <hr style="border:none;border-top:1px solid #E2E8F0;margin:14px 0">
+          <label class="lbl">배정 모드</label>
+          <select style="width:100%"><option>라운드 로빈 (부하 균형)</option><option>최소 부하 우선</option><option>제품군 매칭</option></select>
+          <label class="lbl mt">담당자별 최대 보유</label>
+          <input value="20건" style="width:100%">
+          <label class="lbl mt">제외 조건</label>
+          <div style="line-height:2;font-size:12px">
+            <label style="display:block"><input type="checkbox" checked> SLA 초과 2건+ 담당자 스킵</label>
+            <label style="display:block"><input type="checkbox"> 동일 고객 직전 담당자 우선</label>
+          </div>
+          <div class="note note-blue mt">💡 인입 → 즉시 자동 배정 → 담당자 푸시 + <code>ENGINEER_ASSIGNED</code> 이벤트 자동 기록</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 13: 리포트 (설계 중) ============ -->
+    <section class="page" data-page="13">
+      <div class="page-header">
+        <div><h1>📑 리포트 <span class="badge b-slate" style="font-size:11px">설계 중</span></h1><p class="desc">생성 주기 · 단위 · 형식이 아직 미확정. 실무진 컨펌 후 구현 예정.</p></div>
+      </div>
+
+      <div class="card mb" style="background:linear-gradient(135deg,#FFFBEB,#FFF);border-left:3px solid #F59E0B;text-align:center;padding:30px">
+        <div style="font-size:42px;margin-bottom:8px">🚧</div>
+        <h2 style="color:#92400E;margin-bottom:6px">리포트 모듈은 아직 설계 중입니다</h2>
+        <p class="muted" style="max-width:520px;margin:0 auto">월간 일괄 / 건별 즉시 / 분기 정산 등 어떤 단위로 만들지 실무 협의 후 결정합니다. 아래는 <strong>현재 검토 중인 옵션</strong>입니다.</p>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+        <div class="card">
+          <div style="font-size:24px;margin-bottom:6px">📅</div>
+          <h3>옵션 A — 월간 일괄</h3>
+          <p class="small">매월 1일 자동 생성 · Excel + PDF</p>
+          <ul class="small muted" style="padding-left:16px;line-height:1.7;margin-top:6px">
+            <li>접수 / 완료 / 비용 3축</li>
+            <li>본사 보상 정산용 PDF</li>
+            <li>총괄 · 팀장 모두 다운로드</li>
+          </ul>
+          <div class="badge b-blue mt" style="margin-top:8px">장점: 일관된 포맷</div>
+        </div>
+        <div class="card">
+          <div style="font-size:24px;margin-bottom:6px">📌</div>
+          <h3>옵션 B — 건별 즉시</h3>
+          <p class="small">티켓 종료 시 자동 생성 · 본사 보상 즉시 청구</p>
+          <ul class="small muted" style="padding-left:16px;line-height:1.7;margin-top:6px">
+            <li>처리 즉시 정산 가능</li>
+            <li>월간은 합계만 별도</li>
+            <li>본사 보상 사이클 단축</li>
+          </ul>
+          <div class="badge b-green mt" style="margin-top:8px">장점: 자금 회수 빠름</div>
+        </div>
+        <div class="card">
+          <div style="font-size:24px;margin-bottom:6px">🔀</div>
+          <h3>옵션 C — 하이브리드</h3>
+          <p class="small">건별: 본사 보상 / 월간: 운영 현황</p>
+          <ul class="small muted" style="padding-left:16px;line-height:1.7;margin-top:6px">
+            <li>보상은 건별 즉시</li>
+            <li>운영 KPI는 월간 모음</li>
+            <li>리포트 종류 2개</li>
+          </ul>
+          <div class="badge b-violet mt" style="margin-top:8px">장점: 용도별 최적화</div>
+        </div>
+      </div>
+
+      <div class="card mt">
+        <h3>결정해야 할 것들</h3>
+        <table>
+          <tr><th>항목</th><th>옵션</th><th>현재 의견</th></tr>
+          <tr><td>본사 보상 청구 주기</td><td>건별 / 월간 / 분기</td><td class="muted">미정</td></tr>
+          <tr><td>리포트 생성 주체</td><td>자동 / 팀장 수동</td><td class="muted">미정</td></tr>
+          <tr><td>PDF 양식</td><td>본사 양식 / 자체 양식</td><td class="muted">본사 확인 필요</td></tr>
+          <tr><td>저장 기간</td><td>1년 / 3년 / 영구</td><td class="muted">미정</td></tr>
+          <tr><td>접근 권한</td><td>총괄만 / 팀장도</td><td class="muted">미정</td></tr>
+        </table>
+        <div class="note note-blue mt">💡 일단 <strong>전체 통계 페이지</strong>에서 수동 다운로드만 가능하도록 임시 처리. 정식 리포트는 다음 마일스톤.</div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 14: 전체 통계 ============ -->
+    <section class="page" data-page="14">
+      <div class="page-header">
+        <div><h1>📈 전체 통계 대시보드</h1><p class="desc">총괄 전용 · KPI 4종 + 차트 4종 + 액션 큐 · Live 30초 자동 갱신</p></div>
+        <div class="actions">
+          <select><option>2026-04</option></select>
+          <select><option>전체 브랜드</option></select>
+          <button class="btn btn-secondary">🔄 새로고침</button>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-blue"><div class="label">월 접수량</div><div class="num">247</div><div class="delta up">↑ 12% MoM</div></div>
+        <div class="kpi accent-green"><div class="label">평균 해결 (P50)</div><div class="num">2.4<small>일</small></div><div class="delta up">목표 &lt;3일 ✅</div></div>
+        <div class="kpi accent-amber"><div class="label">SLA 준수율</div><div class="num">94%</div><div class="delta dn">목표 95% ⚠</div></div>
+        <div class="kpi accent-red"><div class="label">월 순비용</div><div class="num red">-890<small>K</small></div><div class="delta up">↓ 21% MoM</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+        <div class="card">
+          <h3>📈 6개월 트렌드</h3>
+          <svg viewBox="0 0 200 90" style="width:100%;height:90px">
+            <polyline points="0,55 33,48 66,42 99,38 132,30 165,25 198,18" fill="none" stroke="#3B82F6" stroke-width="2.5"/>
+            <polyline points="0,68 33,60 66,55 99,48 132,40 165,38 198,28" fill="none" stroke="#10B981" stroke-width="2.5" stroke-dasharray="4,3"/>
+          </svg>
+          <div style="display:flex;justify-content:space-around;font-size:10.5px;color:#64748B"><span>11</span><span>12</span><span>1</span><span>2</span><span>3</span><span>4</span></div>
+          <div style="font-size:11px;margin-top:4px;display:flex;gap:12px"><span style="color:#3B82F6">━ 접수</span><span style="color:#10B981">┄ 완료</span></div>
+        </div>
+        <div class="card">
+          <h3>📊 제품별 A/S 빈도 Top 5</h3>
+          <div class="bar-h"><span class="lbl">WE-300</span><div class="track"><div class="fill" style="width:80%;background:#3B82F6"></div></div><span class="val">68</span></div>
+          <div class="bar-h"><span class="lbl">BS-200</span><div class="track"><div class="fill" style="width:55%;background:#3B82F6"></div></div><span class="val">42</span></div>
+          <div class="bar-h"><span class="lbl">CC-100</span><div class="track"><div class="fill" style="width:42%;background:#3B82F6"></div></div><span class="val">28</span></div>
+          <div class="bar-h"><span class="lbl">WE-200</span><div class="track"><div class="fill" style="width:30%;background:#3B82F6"></div></div><span class="val">19</span></div>
+          <div class="bar-h"><span class="lbl">BS-100</span><div class="track"><div class="fill" style="width:18%;background:#3B82F6"></div></div><span class="val">12</span></div>
+        </div>
+        <div class="card">
+          <h3>🍩 증상 유형 분포</h3>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div class="donut" style="background:conic-gradient(#3B82F6 0 38%,#10B981 38% 62%,#F59E0B 62% 80%,#8B5CF6 80% 92%,#94A3B8 92% 100%)"></div>
+            <div style="font-size:11px;line-height:1.7">
+              <div><span style="display:inline-block;width:8px;height:8px;background:#3B82F6"></span> 음향 38%</div>
+              <div><span style="display:inline-block;width:8px;height:8px;background:#10B981"></span> 충전 24%</div>
+              <div><span style="display:inline-block;width:8px;height:8px;background:#F59E0B"></span> 외관 18%</div>
+              <div><span style="display:inline-block;width:8px;height:8px;background:#8B5CF6"></span> 페어링 12%</div>
+              <div><span style="display:inline-block;width:8px;height:8px;background:#94A3B8"></span> 기타 8%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0;color:#991B1B">⚠ 액션 필요 큐 (tobe-tickets 11개 패턴)</h3>
+          <span class="small muted">클릭 → 해당 티켓 목록</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <span class="badge b-red" style="padding:7px 14px;font-size:12px">🧟 좀비 티켓 <strong>14</strong></span>
+          <span class="badge b-red" style="padding:7px 14px;font-size:12px">📵 응대 누락 <strong>8</strong></span>
+          <span class="badge b-amber" style="padding:7px 14px;font-size:12px">🎭 가짜 완료 <strong>5</strong></span>
+          <span class="badge b-amber" style="padding:7px 14px;font-size:12px">⏰ 시각 오류 <strong>3</strong></span>
+          <span class="badge b-amber" style="padding:7px 14px;font-size:12px">🚫 미배정 4h+ <strong>2</strong></span>
+          <span class="badge b-blue" style="padding:7px 14px;font-size:12px">💰 비용 불일치 <strong>4</strong></span>
+          <span class="badge b-blue" style="padding:7px 14px;font-size:12px">📎 첨부 누락 <strong>6</strong></span>
+          <span class="badge b-blue" style="padding:7px 14px;font-size:12px">📝 메모 미작성 <strong>9</strong></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE 15: 설정 ============ -->
+    <section class="page" data-page="15">
+      <div class="page-header">
+        <div><h1>⚙ 설정</h1><p class="desc">총괄 전용 · 사용자 / 시스템 / LLM 위키 / 기본값</p></div>
+        <div class="actions"><span class="badge b-amber">⚠ 변경 2건</span><button class="btn btn-secondary">되돌리기</button><button class="btn btn-primary">💾 저장</button></div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">사용자</div>
+        <div class="tab">시스템 / SLA</div>
+        <div class="tab">LLM 위키</div>
+        <div class="tab">기본값 (코드/항목)</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px">
+        <div>
+          <div class="card mb">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <h3 style="margin:0">사용자 (12명)</h3>
+              <button class="btn btn-primary btn-sm">+ 사용자 추가</button>
+            </div>
+            <table>
+              <tr><th>이름</th><th>이메일</th><th>역할</th><th>상태</th><th>최근 로그인</th><th></th></tr>
+              <tr><td><strong>박수리</strong></td><td>park@tbnws.com</td><td><span class="badge b-blue">A/S</span></td><td><span class="badge b-green">활성</span></td><td>04-28 14:22</td><td><button class="btn btn-secondary btn-sm">편집</button></td></tr>
+              <tr><td><strong>김기술</strong></td><td>kim.tech@tbnws.com</td><td><span class="badge b-blue">A/S</span></td><td><span class="badge b-green">활성</span></td><td>04-28 09:15</td><td><button class="btn btn-secondary btn-sm">편집</button></td></tr>
+              <tr><td><strong>이수진</strong></td><td>lee.sj@tbnws.com</td><td><span class="badge b-green">CS/CX</span></td><td><span class="badge b-green">활성</span></td><td>04-28 13:40</td><td><button class="btn btn-secondary btn-sm">편집</button></td></tr>
+              <tr><td><strong>김팀장</strong></td><td>kim.team@tbnws.com</td><td><span class="badge b-amber">팀장</span></td><td><span class="badge b-green">활성</span></td><td>04-28 11:08</td><td><button class="btn btn-secondary btn-sm">편집</button></td></tr>
+              <tr style="opacity:.55"><td>최퇴사</td><td>—</td><td><span class="badge b-slate">A/S</span></td><td><span class="badge b-slate">비활성</span></td><td class="muted">2026-02-15</td><td><button class="btn btn-secondary btn-sm">복구</button></td></tr>
+            </table>
+          </div>
+          <div class="card mb">
+            <h3>SLA 단계별 기한</h3>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+              <div><label class="lbl">접수→배정</label><input value="4시간" style="width:100%"></div>
+              <div><label class="lbl">배정→작업</label><input value="1일" style="width:100%"></div>
+              <div><label class="lbl">최초응답</label><input value="24시간" style="width:100%"></div>
+              <div><label class="lbl">전체 해결</label><input value="5일" style="width:100%"></div>
+            </div>
+          </div>
+          <div class="card">
+            <h3>알림 규칙</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px;line-height:2">
+              <label><input type="checkbox" checked> SLA 80% 경과 담당자 알림</label>
+              <label><input type="checkbox" checked> SLA 초과 팀장 에스컬레이션</label>
+              <label><input type="checkbox" checked> 7일 미변경 일일 리마인더</label>
+              <label><input type="checkbox"> 미배정 4h 자동 배정</label>
+              <label><input type="checkbox" checked> 좀비 티켓 주간 리포트</label>
+              <label><input type="checkbox"> 신규 접수 즉시 푸시</label>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="panel mb">
+            <div class="ph"><strong>사용자 추가</strong><span class="close">✕</span></div>
+            <label class="lbl">이름</label>
+            <input placeholder="홍길동" style="width:100%">
+            <label class="lbl mt">이메일</label>
+            <input placeholder="hong@tbnws.com" style="width:100%">
+            <label class="lbl mt">역할</label>
+            <select style="width:100%"><option>A/S 담당자</option><option>CS/CX</option><option>팀장</option><option>총괄</option></select>
+            <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:12px"><input type="checkbox" checked> 초기 비밀번호 자동 생성 + 이메일 발송</label>
+            <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-secondary" style="flex:1">취소</button><button class="btn btn-primary" style="flex:1">추가</button></div>
+          </div>
+          <div class="card">
+            <h3>시스템 상태</h3>
+            <div style="line-height:2;font-size:12px">
+              <div style="display:flex;justify-content:space-between"><span>🤖 LLM 위키 (Claude)</span><span class="badge b-green">연결</span></div>
+              <div style="display:flex;justify-content:space-between"><span>📧 SMTP</span><span class="badge b-green">정상</span></div>
+              <div style="display:flex;justify-content:space-between"><span>📱 SMS / 알림톡</span><span class="badge b-green">정상</span></div>
+              <div style="display:flex;justify-content:space-between"><span>🚚 택배 API (CJ)</span><span class="badge b-amber">설정 필요</span></div>
+              <div style="display:flex;justify-content:space-between"><span>🛡 Tailscale VPN</span><span class="badge b-green">활성</span></div>
+              <div style="display:flex;justify-content:space-between"><span>💾 MySQL 통합 DB</span><span class="badge b-green">정상</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ PAGE AI: AI 의사결정 서포트 ============ -->
+    <section class="page" data-page="ai">
+      <div class="page-header">
+        <div><h1>🤖 AI 의사결정 서포트 <span class="badge" style="background:linear-gradient(135deg,#8B5CF6,#3B82F6);color:#FFF">NEW</span></h1>
+          <p class="desc">로컬 Claude API (Tailscale VPN) · 제품 증상 분석 · 답변 초안 · 유사 케이스 검색 — 모두 <strong>suggestion 형태</strong>, 자동 발송 절대 금지</p></div>
+        <div class="actions"><span class="badge b-green">● 연결됨</span><button class="btn btn-secondary">⚙ 모델 / 프롬프트 설정</button></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px">
+        <div class="kpi accent-violet"><div class="label">금일 호출</div><div class="num" style="color:#8B5CF6">142</div><div class="delta up">↑ 23% MoM</div></div>
+        <div class="kpi accent-green"><div class="label">담당자 채택률</div><div class="num green">78%</div><div class="delta up">권고 적용</div></div>
+        <div class="kpi accent-blue"><div class="label">평균 응답</div><div class="num">1.4<small>초</small></div></div>
+        <div class="kpi"><div class="label">학습 케이스</div><div class="num">40,213</div><div class="delta">crm_as 전수</div></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <!-- Card 1: 증상 분석 -->
+        <div class="card" style="background:linear-gradient(135deg,#F5F3FF,#FFF);border-top:3px solid #8B5CF6">
+          <h3 style="color:#7C3AED">🔬 제품 증상 분석</h3>
+          <p class="small muted mb">고객이 호소한 증상 + 제품 모델 → 추정 원인 + 처리 분기 추천</p>
+          <label class="lbl">제품 모델</label>
+          <select style="width:100%"><option>WE-300 이어폰 Pro</option></select>
+          <label class="lbl mt">증상 (자유 입력)</label>
+          <textarea style="width:100%;height:55px;resize:none">좌측 이어폰에서 소리가 나지 않음. 충전은 정상.</textarea>
+          <button class="btn" style="width:100%;margin-top:8px;background:linear-gradient(135deg,#8B5CF6,#3B82F6);color:#FFF">🤖 분석 시작</button>
+          <div style="background:#FFF;border:1px solid #DDD6FE;border-radius:7px;padding:10px;margin-top:10px">
+            <div class="small" style="color:#7C3AED;font-weight:700">결과</div>
+            <div style="font-size:12px;line-height:1.7;margin-top:4px">
+              <strong>1순위 (76%):</strong> 좌측 드라이버 유닛 단선<br>
+              <strong>2순위 (14%):</strong> 좌우 분리 배선 접촉 불량<br>
+              <strong>3순위 (10%):</strong> 펌웨어 페어링 오류
+            </div>
+            <div class="note note-blue mt">💡 1순위 케이스 76건 중 70%가 부품 교체 수리로 해결됨. 평균 처리 2.8일.</div>
+          </div>
+        </div>
+
+        <!-- Card 2: 답변 초안 -->
+        <div class="card" style="background:linear-gradient(135deg,#EFF6FF,#FFF);border-top:3px solid #3B82F6">
+          <h3 style="color:#1E40AF">✉ 답변 초안 작성</h3>
+          <p class="small muted mb">티켓 컨텍스트 + 어조(공손/사무/친근) → 초안 생성. 담당자 검토 후 발송.</p>
+          <label class="lbl">대상 티켓</label>
+          <input value="AS-2641 · 김민수 · WE-300 좌측 무음" readonly style="width:100%;background:#F0FDF4">
+          <label class="lbl mt">발송 채널 / 어조</label>
+          <div style="display:flex;gap:6px">
+            <select style="flex:1"><option>📧 이메일</option><option>💬 알림톡</option><option>📱 SMS</option></select>
+            <select style="flex:1"><option>공손체</option><option>사무체</option><option>친근체</option></select>
+          </div>
+          <button class="btn btn-primary" style="width:100%;margin-top:8px">✏ 초안 생성</button>
+          <div style="background:#FFF;border:1px solid #BFDBFE;border-radius:7px;padding:10px;margin-top:10px;font-size:12px;line-height:1.6">
+            "안녕하세요 김민수님. WE-300 좌측 이어폰 무음 증상 관련하여 A/S 진행 안내드립니다. 진단 결과 드라이버 유닛 단선으로 확인되어 부품 교체 수리를 진행 예정이며, 예상 완료일은 04-30입니다. 수리 완료 시 다시 연락드리겠습니다."
+          </div>
+          <div style="display:flex;gap:5px;margin-top:8px">
+            <button class="btn btn-secondary btn-sm" style="flex:1">✏ 편집</button>
+            <button class="btn btn-secondary btn-sm" style="flex:1">🔄 다시</button>
+            <button class="btn btn-primary btn-sm" style="flex:1">📧 발송 검토</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <!-- Card 3: 유사 케이스 -->
+        <div class="card">
+          <h3>🔍 유사 케이스 검색</h3>
+          <p class="small muted mb">의미 기반 검색 — 키워드 일치보다 증상·맥락 유사도</p>
+          <input value="이어폰 좌측 소리 안 남" style="width:100%">
+          <button class="btn btn-secondary" style="width:100%;margin-top:6px">🔍 검색</button>
+          <table style="margin-top:10px">
+            <tr><th>티켓</th><th>유사도</th><th>처리 결과</th><th>소요</th></tr>
+            <tr><td>AS-2218</td><td><span class="badge b-violet">98%</span></td><td>드라이버 교체 (수리)</td><td>2.5일</td></tr>
+            <tr><td>AS-2057</td><td><span class="badge b-violet">94%</span></td><td>제품 교환 (보증)</td><td>1.8일</td></tr>
+            <tr><td>AS-1908</td><td><span class="badge b-violet">89%</span></td><td>드라이버 교체 (수리)</td><td>3.2일</td></tr>
+            <tr><td>AS-1742</td><td><span class="badge b-blue">82%</span></td><td>펌웨어 재설치</td><td>0.5일</td></tr>
+          </table>
+        </div>
+
+        <!-- Card 4: 고객 컨텍스트 요약 -->
+        <div class="card">
+          <h3>👤 고객 컨텍스트 요약</h3>
+          <p class="small muted mb">전화 받기 전 빠른 브리핑 — 통합 이력을 1문단 요약</p>
+          <input placeholder="010-XXXX-XXXX" value="010-1234-5678" style="width:100%">
+          <button class="btn btn-secondary" style="width:100%;margin-top:6px">🤖 요약 생성</button>
+          <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:7px;padding:10px;margin-top:10px;font-size:12px;line-height:1.7">
+            <strong>김민수 (VIP, 가입 1년 8개월)</strong> 고객은 총 5회 구매 중 3건 A/S 이력이 있으며, 전부 수리로 마무리되었습니다. <strong>현재 진행 중 1건(AS-2641, WE-300 좌측 무음)</strong>이 있고 04-28 접수, 부품 입고 완료 후 출고 대기 상태입니다. <strong>커뮤니케이션 응답성이 좋은 편</strong>이고, 최근 상담에서 만족도가 높았습니다. 보증 기간 내(331일) 케이스이므로 본사 보상 청구 가능합니다.
+          </div>
+          <div class="note note-blue mt">💡 통화 인입 시 자동으로 좌측 패널에 표시됨</div>
+        </div>
+      </div>
+
+      <!-- Activity log -->
+      <div class="card mb">
+        <h3>📜 AI 호출 이력 (최근)</h3>
+        <table>
+          <tr><th>시각</th><th>유형</th><th>대상</th><th>호출자</th><th>결과 채택</th><th></th></tr>
+          <tr class="highlight"><td>14:22</td><td><span class="badge b-violet">증상 분석</span></td><td>AS-2641 / WE-300</td><td>박수리</td><td><span class="badge b-green">✓ 채택</span></td><td><button class="btn btn-secondary btn-sm">상세</button></td></tr>
+          <tr><td>13:55</td><td><span class="badge b-blue">답변 초안</span></td><td>AS-2640</td><td>박수리</td><td><span class="badge b-green">✓ 편집 후 발송</span></td><td><button class="btn btn-secondary btn-sm">상세</button></td></tr>
+          <tr><td>13:30</td><td><span class="badge b-blue">고객 요약</span></td><td>010-9876-5432</td><td>이수진</td><td><span class="badge b-slate">조회만</span></td><td><button class="btn btn-secondary btn-sm">상세</button></td></tr>
+          <tr><td>12:48</td><td><span class="badge b-violet">유사 케이스</span></td><td>"BS-200 충전 안됨"</td><td>김기술</td><td><span class="badge b-amber">미채택 (수동 진단)</span></td><td><button class="btn btn-secondary btn-sm">상세</button></td></tr>
+          <tr><td>11:15</td><td><span class="badge b-violet">증상 분석</span></td><td>AS-2638 / BS-200</td><td>김기술</td><td><span class="badge b-green">✓ 채택</span></td><td><button class="btn btn-secondary btn-sm">상세</button></td></tr>
+        </table>
+      </div>
+
+      <!-- Settings panel -->
+      <div style="display:grid;grid-template-columns:1.5fr 1fr;gap:14px">
+        <div class="card">
+          <h3>🛡 사용 정책</h3>
+          <div style="line-height:2;font-size:12px">
+            <div>✅ <strong>모든 출력은 suggestion</strong> — 시스템이 직접 발송하지 않음</div>
+            <div>✅ <strong>고객 PII는 마스킹 후 전송</strong> (이름은 성만, 전화는 끝 4자리)</div>
+            <div>✅ <strong>로컬 Claude API</strong> 사용, 외부 인터넷으로 전송 없음 (Tailscale VPN)</div>
+            <div>✅ <strong>호출 이력 전수 기록</strong> — 누가 언제 무엇을 받았고 채택했는지 감사 가능</div>
+            <div>❌ <strong>가격 결정 / 보상 결정 등 비용 관련 자동화 금지</strong></div>
+            <div>❌ <strong>고객 클레임 대응 자동 발송 금지</strong></div>
+          </div>
+        </div>
+        <div class="card">
+          <h3>📊 효과 측정 (최근 30일)</h3>
+          <div style="line-height:2.2;font-size:12px">
+            <div>평균 답변 작성 시간: <strong>5분 → 1.2분</strong> <span class="badge b-green">↓ 76%</span></div>
+            <div>최초 응답까지: <strong>3.4시간 → 2.1시간</strong> <span class="badge b-green">↓ 38%</span></div>
+            <div>처리 분기 일치율: <strong>83%</strong> (AI 추천 vs 실제 결정)</div>
+            <div>담당자 만족도: <strong>4.6 / 5</strong></div>
+          </div>
+          <div class="note note-amber mt">⚠ 효과 측정은 익명화된 메타데이터만 사용. 개별 담당자 평가에 활용하지 않음.</div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Status bar -->
+  <div class="statusbar">
+    <span>🟢 Spring API</span><span class="sep">·</span>
+    <span>📡 Tailscale VPN</span><span class="sep">·</span>
+    <span class="live">● Live · 다음 갱신 28s</span><span class="sep">·</span>
+    <span>박수리 / A/S 담당자</span>
+    <span style="margin-left:auto">2026-04-28 (월) 14:22 · v0.2.0-prototype</span>
+  </div>
+</div>
+
+<script>
+  // 페이지 전환
+  const navItems = document.querySelectorAll('.nav-item');
+  const pages = document.querySelectorAll('.page');
+  const crumb = document.getElementById('crumb');
+  const crumbMap = {
+    1:'고객 정보 조회', 2:'전체 상담 내역', 3:'젠데스크 조회',
+    'tickets':'A/S 티켓 목록',
+    4:'A/S 상세 (단계별)', 5:'A/S 현황 대시보드', 6:'A/S 비용 추적',
+    7:'A/S 출고 관리', 8:'회수 관리', 9:'정품등록 · 시리얼',
+    10:'교환 · 반품', 11:'이메일 · SMS 로그', 12:'티켓 배분',
+    13:'리포트 (설계 중)', 14:'전체 통계', 15:'설정',
+    'ai':'AI 의사결정 서포트'
+  };
+  navItems.forEach(item=>{
+    item.addEventListener('click',()=>{
+      const id = item.dataset.page;
+      navItems.forEach(n=>n.classList.remove('active'));
+      pages.forEach(p=>p.classList.remove('active'));
+      item.classList.add('active');
+      document.querySelector(`.page[data-page="${id}"]`).classList.add('active');
+      crumb.textContent = crumbMap[id];
+      document.querySelector('.main').scrollTop = 0;
+    });
+  });
+
+  // Tab 전환 (페이지 내부 .tabs)
+  document.querySelectorAll('.tabs').forEach(tabs=>{
+    tabs.querySelectorAll('.tab').forEach(t=>{
+      t.addEventListener('click',()=>{
+        tabs.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+        t.classList.add('active');
+      });
+    });
+  });
+
+  // 키보드 단축키 (← → 페이지 이동)
+  document.addEventListener('keydown',e=>{
+    if(e.key==='ArrowRight' || e.key==='ArrowLeft'){
+      const cur = document.querySelector('.nav-item.active');
+      const all = Array.from(navItems);
+      const i = all.indexOf(cur);
+      const next = e.key==='ArrowRight' ? Math.min(i+1,all.length-1) : Math.max(i-1,0);
+      all[next].click();
+    }
+  });
+</script>
+</body>
+</html>

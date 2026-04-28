@@ -1,0 +1,49 @@
+# electron-builder configuration
+# https://www.electron.build/configuration
+
+appId: com.tbnws.as-cs-platform
+productName: "A/S & CS 통합 관리 플랫폼"
+copyright: "Copyright © 2026 TBNWS"
+
+directories:
+  output: release
+  buildResources: build-resources
+
+files:
+  - dist/**/*
+  - electron/**/*
+  - public/favicon.svg
+  - "!node_modules/**/*"
+
+# Vite 빌드 결과물에서 index.html 로드
+extraMetadata:
+  main: electron/main.cjs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "${productName}-${version}-win-${arch}.${ext}"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: true
+
+mac:
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.business
+  artifactName: "${productName}-${version}-mac-${arch}.${ext}"
+
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+  category: Office
+  artifactName: "${productName}-${version}-linux-${arch}.${ext}"
