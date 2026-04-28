@@ -7,9 +7,9 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
-    "dev:electron": "concurrently -k -n VITE,ELECTRON \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "build": "tsc -b && vite build",
-    "build:electron": "tsc -b && vite build && electron-builder --config electron-builder.yml",
+    "electron": "concurrently -k -n VITE,ELECTRON \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "build": "tsc -b && vite build && electron-builder --config electron-builder.yml",
+    "build:web": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
