@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/*
+ * A/S & CS 통합 관리 플랫폼 — Global Styles
+ * Design tokens from prototype-v2
+ */
+
+/* ===== Custom Theme Variables ===== */
+:root {
+  /* Primary */
+  --color-primary: #1E40AF;
+  --color-primary-dark: #1E3A8A;
+  --color-primary-light: #3B82F6;
+
+  /* Layout */
+  --color-sidebar-bg: #0F172A;
+  --color-main-bg: #F8FAFC;
+  --color-card-bg: #FFFFFF;
+  --color-border: #E2E8F0;
+
+  /* Text */
+  --color-text-primary: #1E293B;
+  --color-text-secondary: #64748B;
+  --color-text-muted: #94A3B8;
+
+  /* Semantic */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-violet: #8B5CF6;
+
+  /* Layout dimensions */
+  --titlebar-height: 32px;
+  --topbar-height: 56px;
+  --sidebar-width: 240px;
+  --statusbar-height: 22px;
+}
+
+/* ===== Base ===== */
+body {
+  font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== Electron titlebar drag ===== */
+.app-titlebar {
+  -webkit-app-region: drag;
+}
+
+/* ===== Scrollbar (sidebar, main) ===== */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
