@@ -1,0 +1,475 @@
+{
+  "meta": {
+    "document": "Phase 2 Technical Design",
+    "phase": "Phase 2: 기반 구축 및 고객 조회",
+    "createdAt": "2026-04-28",
+    "scope": "인증/권한 + Spring API 연동 + 고객 조회 페이지"
+  },
+
+  "section1_architecture": {
+    "title": "(1) React + Electron + Spring Boot 연동 아키텍처",
+
+    "overview": "React(Renderer) -> HTTP/REST -> Spring Boot API -> MySQL. Electron은 Renderer를 감싸는 셸 역할만 하며, 비즈니스 로직과 DB 접근은 전부 Spring Boot에서 처리한다. 클라이언트->DB 직접 쿼리 금지 원칙.",
+
+    "layers": {
+      "electron_main": {
+        "role": "앱 셸 (BrowserWindow 생성, IPC 핸들러, 시스템 통합)",
+        "files": ["electron/main.cjs", "electron/preload.cjs"],
+        "ipc_use_cases": [
+          "get-version: 앱 버전 조회",
+          "secure-store-get / secure-store-set: JWT 토큰 안전 저장 (keytar/safeStorage)",
+          "show-notification: 시스템 알림",
+          "open-file-dialog: 증빙 파일 첨부"
+        ],
+        "security": "nodeIntegration: false, contextIsolation: true, sandbox: true 유지"
+      },
+      "renderer_react": {
+        "role": "UI 렌더링 + 상태 관리 + API 호출",
+        "key_dirs": ["src/pages/", "src/components/", "src/layouts/", "src/api/", "src/hooks/", "src/stores/"],
+        "state_management": "zustand (경량, TypeScript 친화, boilerplate 최소)"
+      },
+      "api_layer": {
+        "role": "Spring Boot REST API 호출 추상화",
+        "location": "src/api/",
+        "pattern": "apiClient (axios instance) + 도메인별 service 모듈"
+      },
+      "spring_boot_backend": {
+        "role": "비즈니스 로직, DB 접근, 인증/인가",
+        "base_url_dev": "http://localhost:8080/api",
+        "base_url_prod": "https://admin.tbnws.com/api",
+        "existing": true,
+        "note": "기존 어드민 API를 재사용·확장. 신규 엔드포인트만 추가."
+      }
+    },
+
+    "ipc_best_practices": {
+      "pattern": "Renderer -> preload (contextBridge) -> ipcRenderer.invoke() -> Main (ipcMain.handle()) -> Response",
+      "rules": [
+        "모든 IPC는 invoke/handle 패턴 사용 (양방향 Promise, send/on 대신)",
+        "preload에서 노출하는 API를 최소한으로 제한 (whitelist 방식)",
+        "Renderer에서는 window.electronAPI?.method() 옵셔널 체이닝으로 웹/Electron 양쪽 호환",
+        "IPC로 민감 데이터(토큰) 전달 시 Main 프로세스의 safeStorage 사용",
+        "IPC 채널명 상수로 관리 (shared/ipc-channels.ts)"
+      ],
+      "anti_patterns": [
+        "ipcRenderer를 직접 Renderer에 노출하지 않음",
+        "nodeIntegration: true 절대 금지",
+        "IPC로 대용량 데이터 전송 금지 (API 레이어 사용)"
+      ]
+    },
+
+    "recommended_libraries": {
+      "state": { "name": "zustand", "version": "^5.x", "reason": "경량(1.1KB), TypeScript devtools 지원, React 19 호환" },
+      "http": { "name": "axios", "version": "^1.9", "reason": "interceptor(토큰 자동 주입, 에러 핸들링), 취소, 진행률 지원" },
+      "server_state": { "name": "@tanstack/react-query", "version": "^5.x", "reason": "캐싱, 자동 재조회, 페이지네이션, optimistic update" },
+      "form": { "name": "react-hook-form", "version": "^7.x", "reason": "비제어 컴포넌트 기반, 성능 우수, zod 연동" },
+      "validation": { "name": "zod", "version": "^3.x", "reason": "TypeScript-first, API 응답/폼 양쪽 검증" },
+      "date": { "name": "dayjs", "version": "^1.x", "reason": "2KB, date-fns 대비 번들 크기 우위" }
+    }
+  },
+
+  "section2_authentication": {
+    "title": "(2) JWT vs Session 인증 비교 및 Electron 토큰 보안",
+
+    "comparison": {
+      "jwt": {
+        "pros": [
+          "Stateless — Spring 서버 세션 저장 불필요, 수평 확장 용이",
+          "Electron + 웹 브라우저 동일 로직 사용 가능",
+          "Authorization 헤더만으로 인증 — CORS 쿠키 설정 불필요",
+          "기존 Spring Boot API가 JWT 발급 가능하면 추가 인프라 없음"
+        ],
+        "cons": [
+          "토큰 탈취 시 만료까지 무효화 어려움 (Refresh Token 필요)",
+          "Payload 크기가 Session ID보다 큼 (~800B)",
+          "클라이언트에서 토큰 안전 저장 책임"
+        ]
+      },
+      "session": {
+        "pros": [
+          "서버에서 즉시 세션 무효화 가능",
+          "클라이언트는 세션 ID(쿠키)만 관리",
+          "Spring Security 기본 세션 관리 바로 사용"
+        ],
+        "cons": [
+          "Electron에서 httpOnly 쿠키 관리가 까다로움 (BrowserWindow session/cookie API 필요)",
+          "모바일 웹과 Electron 간 쿠키 도메인 불일치 문제",
+          "서버 Scale-out 시 세션 공유 인프라 필요 (Redis 등)",
+          "CORS + SameSite 설정이 Electron file:// 프로토콜과 충돌"
+        ]
+      }
+    },
+
+    "decision": "JWT (Access + Refresh Token)",
+    "decision_rationale": [
+      "Electron(file://) + 웹(https://) 양쪽 동일 Authorization 헤더 패턴",
+      "기존 Spring Boot API 확장에 세션 인프라 추가 불필요",
+      "사용자 12명으로 서버 부하 극히 낮음 — Stateless 이점 극대화",
+      "Refresh Token으로 Access Token 자동 갱신하여 UX 끊김 방지"
+    ],
+
+    "token_flow": {
+      "login": "POST /api/auth/login {email, password} -> {accessToken(15분), refreshToken(7일)}",
+      "refresh": "POST /api/auth/refresh {refreshToken} -> {newAccessToken, newRefreshToken}",
+      "logout": "POST /api/auth/logout -> 서버 Refresh Token blacklist 등록",
+      "verify": "모든 API 요청에 Authorization: Bearer {accessToken} 헤더"
+    },
+
+    "electron_token_storage": {
+      "recommended": "Electron safeStorage API (Chromium OS credential store 활용)",
+      "mechanism": [
+        "Main Process: safeStorage.encryptString(token) -> 암호화된 Buffer를 파일에 저장",
+        "Main Process: safeStorage.decryptString(buffer) -> 복호화하여 Renderer에 전달",
+        "IPC 채널: secure-store-get, secure-store-set, secure-store-delete",
+        "Windows: DPAPI (Data Protection API) 자동 사용",
+        "macOS: Keychain 자동 사용",
+        "Linux: libsecret 또는 gnome-keyring"
+      ],
+      "fallback_web": "메모리 변수 (sessionStorage는 XSS에 취약하므로 사용하지 않음, httpOnly 쿠키 불가능하므로 In-memory + 페이지 새로고침 시 재로그인)",
+      "anti_patterns": [
+        "localStorage에 JWT 저장 금지 (XSS 탈취)",
+        "sessionStorage도 권장하지 않음 (XSS 동일)",
+        "Electron Renderer에서 직접 fs 모듈로 토큰 파일 읽기/쓰기 금지"
+      ]
+    },
+
+    "implementation_example": {
+      "preload_extension": {
+        "file": "electron/preload.cjs",
+        "code_snippet": "contextBridge.exposeInMainWorld('electronAPI', {\n  secureStore: {\n    get: (key) => ipcRenderer.invoke('secure-store-get', key),\n    set: (key, value) => ipcRenderer.invoke('secure-store-set', key, value),\n    delete: (key) => ipcRenderer.invoke('secure-store-delete', key),\n  },\n  // ... existing\n})"
+      },
+      "main_handler": {
+        "file": "electron/main.cjs",
+        "code_snippet": "const { safeStorage } = require('electron');\nconst Store = require('electron-store');\nconst store = new Store({ encryptionKey: 'as-cs-platform' });\n\nipcMain.handle('secure-store-set', (_e, key, value) => {\n  if (!safeStorage.isEncryptionAvailable()) throw new Error('Encryption unavailable');\n  const encrypted = safeStorage.encryptString(value);\n  store.set(key, encrypted.toString('base64'));\n});\n\nipcMain.handle('secure-store-get', (_e, key) => {\n  const raw = store.get(key);\n  if (!raw) return null;\n  return safeStorage.decryptString(Buffer.from(raw, 'base64'));\n});"
+      },
+      "auth_service": {
+        "file": "src/api/auth.ts",
+        "code_snippet": "async function getStoredToken(): Promise<string | null> {\n  if (window.electronAPI?.secureStore) {\n    return window.electronAPI.secureStore.get('accessToken');\n  }\n  // Web fallback: in-memory\n  return memoryTokenStore.accessToken;\n}"
+      }
+    }
+  },
+
+  "section3_rbac": {
+    "title": "(3) 4역할 RBAC 구현 패턴",
+
+    "roles": {
+      "ADMIN": {
+        "label": "총괄",
+        "count": 1,
+        "permissions": ["*"],
+        "accessible_pages": "ALL (1~15 + ai)",
+        "description": "전체 대시보드, 설정, 사용자 관리, 모든 데이터 접근"
+      },
+      "TEAM_LEAD": {
+        "label": "팀장",
+        "count": 2,
+        "permissions": ["ticket:read", "ticket:assign", "cost:read", "cost:approve", "report:read", "stats:read", "customer:read", "consultation:read"],
+        "accessible_pages": ["/", "/1", "/2", "/3", "/tickets", "/4", "/6", "/12", "/13", "/14"],
+        "description": "티켓 배분, 비용 승인, 리포트, 통계"
+      },
+      "AS_ENGINEER": {
+        "label": "A/S 담당자",
+        "count": 5,
+        "permissions": ["ticket:read", "ticket:write", "ticket:own", "cost:write", "shipment:write", "recall:write", "customer:read", "product:read"],
+        "accessible_pages": ["/", "/1", "/2", "/tickets", "/4", "/6", "/7", "/8", "/9", "/10", "/ai"],
+        "description": "A/S 접수, 진행, 종료, 출고, 회수, 비용 입력"
+      },
+      "CS_CX": {
+        "label": "CS/CX",
+        "count": 4,
+        "permissions": ["ticket:read", "customer:read", "consultation:read", "consultation:write", "mail:read"],
+        "accessible_pages": ["/", "/1", "/2", "/3", "/tickets", "/11"],
+        "description": "상담 내역 조회/작성, 티켓 조회(읽기 전용)"
+      }
+    },
+
+    "implementation": {
+      "jwt_payload": {
+        "structure": {
+          "sub": "user-uuid",
+          "email": "park@tbnws.com",
+          "name": "박수리",
+          "role": "AS_ENGINEER",
+          "permissions": ["ticket:read", "ticket:write", "..."],
+          "iat": 1745000000,
+          "exp": 1745000900
+        }
+      },
+
+      "auth_store": {
+        "file": "src/stores/authStore.ts",
+        "pattern": "zustand persist middleware (Electron: secureStore / Web: memory)",
+        "shape": {
+          "user": "{ id, email, name, role, permissions } | null",
+          "accessToken": "string | null",
+          "isAuthenticated": "boolean (computed)",
+          "login": "(email, password) => Promise<void>",
+          "logout": "() => Promise<void>",
+          "refreshToken": "() => Promise<void>"
+        }
+      },
+
+      "route_guard": {
+        "file": "src/components/guards/RequireAuth.tsx",
+        "pattern": "Wrapper component that checks authStore.isAuthenticated, redirects to /login if false",
+        "code_example": "function RequireAuth({ children, allowedRoles }: { children: ReactNode; allowedRoles?: UserRole[] }) {\n  const { user, isAuthenticated } = useAuthStore();\n  const location = useLocation();\n\n  if (!isAuthenticated) {\n    return <Navigate to=\"/login\" state={{ from: location }} replace />;\n  }\n\n  if (allowedRoles && user && !allowedRoles.includes(user.role)) {\n    return <Navigate to=\"/unauthorized\" replace />;\n  }\n\n  return <>{children}</>;\n}"
+      },
+
+      "permission_hook": {
+        "file": "src/hooks/usePermission.ts",
+        "pattern": "Hook that checks if current user has specific permission(s)",
+        "code_example": "function usePermission(required: string | string[]): boolean {\n  const { user } = useAuthStore();\n  if (!user) return false;\n  if (user.role === 'ADMIN') return true;\n  const perms = Array.isArray(required) ? required : [required];\n  return perms.every(p => user.permissions.includes(p));\n}"
+      },
+
+      "ui_conditional": {
+        "file": "src/components/guards/Can.tsx",
+        "pattern": "Declarative permission check for UI elements (buttons, sections)",
+        "code_example": "<Can permission=\"cost:approve\">\n  <button className=\"btn btn-success\">승인</button>\n</Can>"
+      },
+
+      "sidebar_filtering": {
+        "pattern": "Sidebar navGroups에 requiredRole 또는 requiredPermission 추가, 현재 유저 역할에 따라 필터링",
+        "note": "NavItem interface에 roles?: UserRole[] 추가 후, Sidebar 렌더링 시 user.role 체크"
+      },
+
+      "spring_side": {
+        "pattern": "Spring Security @PreAuthorize 어노테이션 + JWT Filter",
+        "example": "@PreAuthorize(\"hasRole('ADMIN') or hasRole('TEAM_LEAD')\")\n@GetMapping(\"/api/cost/approve/{id}\")\npublic ResponseEntity<?> approveCost(...)"
+      }
+    },
+
+    "cautions": [
+      "프론트엔드 RBAC는 UX 편의용 — 실제 보안은 반드시 Spring 백엔드에서 검증",
+      "역할 변경 시 JWT 재발급 필요 (기존 토큰은 이전 역할 보유)",
+      "ADMIN 역할은 UI에서 모든 권한 체크 바이패스하되, 서버에서도 동일하게 처리",
+      "permission 문자열은 Spring과 프론트엔드가 동일 값 공유 (shared constants)"
+    ]
+  },
+
+  "section4_http_client": {
+    "title": "(4) HTTP 클라이언트 및 API 레이어 아키텍처",
+
+    "comparison": {
+      "fetch": {
+        "pros": ["브라우저 내장, 번들 0KB", "Streaming 지원"],
+        "cons": ["interceptor 없음 (래퍼 필요)", "에러 핸들링 불편 (status 200 외 throw 안함)", "요청 취소 AbortController 직접 관리", "진행률 지원 복잡"]
+      },
+      "axios": {
+        "pros": ["interceptor로 토큰 주입/에러 처리 자동화", "request/response 변환 내장", "취소 토큰 내장", "업로드 진행률 onUploadProgress", "isAxiosError 타입 가드"],
+        "cons": ["번들 +13KB (gzip 4.5KB)", "과거 보안 이슈 이력 (해결됨)"]
+      },
+      "tanstack_react_query": {
+        "pros": ["서버 상태 캐싱/동기화 자동", "staleTime/gcTime으로 불필요 재요청 방지", "useMutation으로 optimistic update", "devtools 내장", "페이지네이션/무한스크롤 내장"],
+        "cons": ["학습곡선", "클라이언트 상태와 분리 필요", "단독 사용 불가 — HTTP 클라이언트(axios/fetch) 필요"]
+      }
+    },
+
+    "decision": "axios + @tanstack/react-query 조합",
+    "decision_rationale": [
+      "axios interceptor로 JWT 자동 주입 + 401 시 자동 refresh 처리",
+      "react-query로 GET 요청 캐싱 (고객 조회 동일 전화번호 반복 호출 방지)",
+      "useMutation으로 POST/PUT 후 관련 쿼리 자동 invalidation",
+      "devtools로 캐시 상태 실시간 디버깅"
+    ],
+
+    "api_layer_architecture": {
+      "directory_structure": {
+        "src/api/client.ts": "axios 인스턴스 (baseURL, interceptor, 에러 핸들링)",
+        "src/api/auth.ts": "login(), refresh(), logout() — 인증 관련",
+        "src/api/customer.ts": "getByPhone(), getById(), getPurchaseHistory(), getConsultations() 등",
+        "src/api/ticket.ts": "Phase 3에서 확장",
+        "src/api/types.ts": "API 요청/응답 TypeScript 인터페이스 (zod 스키마)",
+        "src/hooks/queries/useCustomer.ts": "react-query hooks (useCustomerByPhone 등)"
+      },
+
+      "client_implementation": {
+        "file": "src/api/client.ts",
+        "code_example": "import axios from 'axios';\nimport { useAuthStore } from '@/stores/authStore';\n\nconst apiClient = axios.create({\n  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api',\n  timeout: 15000,\n  headers: { 'Content-Type': 'application/json' },\n});\n\n// Request interceptor: JWT 자동 주입\napiClient.interceptors.request.use((config) => {\n  const token = useAuthStore.getState().accessToken;\n  if (token) config.headers.Authorization = `Bearer ${token}`;\n  return config;\n});\n\n// Response interceptor: 401 시 자동 refresh\napiClient.interceptors.response.use(\n  (response) => response,\n  async (error) => {\n    const original = error.config;\n    if (error.response?.status === 401 && !original._retry) {\n      original._retry = true;\n      try {\n        await useAuthStore.getState().refreshToken();\n        original.headers.Authorization = `Bearer ${useAuthStore.getState().accessToken}`;\n        return apiClient(original);\n      } catch {\n        useAuthStore.getState().logout();\n        window.location.href = '/login';\n      }\n    }\n    return Promise.reject(error);\n  }\n);\n\nexport { apiClient };"
+      },
+
+      "react_query_setup": {
+        "file": "src/main.tsx",
+        "code_example": "import { QueryClient, QueryClientProvider } from '@tanstack/react-query';\nimport { ReactQueryDevtools } from '@tanstack/react-query-devtools';\n\nconst queryClient = new QueryClient({\n  defaultOptions: {\n    queries: {\n      staleTime: 30_000, // 30초\n      retry: 1,\n      refetchOnWindowFocus: false,\n    },\n  },\n});\n\n// <QueryClientProvider client={queryClient}> 으로 App 감싸기"
+      },
+
+      "domain_service_example": {
+        "file": "src/api/customer.ts",
+        "code_example": "import { apiClient } from './client';\nimport type { Customer, PurchaseHistory, ConsultationLog } from './types';\n\nexport const customerApi = {\n  getByPhone: (phone: string) =>\n    apiClient.get<Customer>(`/customers/phone/${encodeURIComponent(phone)}`).then(r => r.data),\n\n  getPurchases: (customerId: string) =>\n    apiClient.get<PurchaseHistory[]>(`/customers/${customerId}/purchases`).then(r => r.data),\n\n  getConsultations: (customerId: string, page = 0) =>\n    apiClient.get<PageResponse<ConsultationLog>>(`/customers/${customerId}/consultations`, {\n      params: { page, size: 20 }\n    }).then(r => r.data),\n};"
+      },
+
+      "query_hook_example": {
+        "file": "src/hooks/queries/useCustomer.ts",
+        "code_example": "import { useQuery } from '@tanstack/react-query';\nimport { customerApi } from '@/api/customer';\n\nexport function useCustomerByPhone(phone: string) {\n  return useQuery({\n    queryKey: ['customer', 'phone', phone],\n    queryFn: () => customerApi.getByPhone(phone),\n    enabled: phone.length >= 10,  // 전화번호 최소 길이\n  });\n}\n\nexport function usePurchaseHistory(customerId: string | undefined) {\n  return useQuery({\n    queryKey: ['customer', customerId, 'purchases'],\n    queryFn: () => customerApi.getPurchases(customerId!),\n    enabled: !!customerId,\n  });\n}"
+      }
+    },
+
+    "cautions": [
+      "API baseURL은 환경변수(VITE_API_BASE_URL)로 관리 — .env.development / .env.production 분리",
+      "axios interceptor에서 zustand store 직접 참조 시 구독이 아닌 getState() 사용",
+      "react-query의 queryKey 네이밍 컨벤션 통일: ['domain', id, 'sub-resource']",
+      "파일 업로드는 Content-Type: multipart/form-data로 별도 처리",
+      "에러 응답 구조를 Spring과 합의: { code: string, message: string, details?: any }"
+    ]
+  },
+
+  "section5_customer_ui": {
+    "title": "(5) 고객 조회 UI 패턴",
+
+    "flow": [
+      "1. 전화번호 입력 + 검색 버튼 (또는 Enter)",
+      "2. API 호출: GET /api/customers/phone/{phone}",
+      "3. 고객 프로필 카드 표시 (아바타, 이름, VIP 뱃지, 연락처, 가입일, 총 구매금액, A/S 건수)",
+      "4. 5개 탭 (구매이력 / A/S이력 / 상담이력 / 정품등록 / 메모)",
+      "5. 각 탭은 lazy-load — 탭 활성화 시 해당 API 호출",
+      "6. 탭 내 테이블은 페이지네이션 + 정렬 지원"
+    ],
+
+    "component_tree": {
+      "CustomerPage": {
+        "children": [
+          "CustomerSearchBar (전화번호 입력 + 필터)",
+          "CustomerProfileCard (검색 결과 상단 프로필)",
+          "CustomerTabs (5개 탭 컨테이너)",
+          {
+            "tab_components": [
+              "PurchaseHistoryTab (구매이력 테이블)",
+              "AsHistoryTab (A/S이력 타임라인)",
+              "ConsultationTab (상담이력 목록)",
+              "ProductRegistrationTab (정품등록 카드)",
+              "MemoTab (메모 CRUD)"
+            ]
+          }
+        ]
+      }
+    },
+
+    "search_bar": {
+      "phone_input": {
+        "type": "tel",
+        "placeholder": "010-0000-0000",
+        "auto_format": "010-1234-5678 형태 자동 포맷팅 (하이픈 자동 삽입)",
+        "validation": "zod: z.string().regex(/^01[016789]-?\\d{3,4}-?\\d{4}$/)",
+        "submit": "Enter 키 또는 검색 버튼 클릭"
+      },
+      "additional_filters": {
+        "customer_name": "선택적 텍스트 입력",
+        "status": "전체 / VIP / 일반 (select)"
+      }
+    },
+
+    "profile_card": {
+      "layout": "prototype-v2 기준 — 그라데이션 배경, 좌측 아바타(성+이름), 우측 5개 KPI",
+      "fields": [
+        { "label": "아바타", "source": "name 첫 두 글자" },
+        { "label": "이름 + 뱃지", "source": "name + grade(VIP/일반)" },
+        { "label": "연락처/이메일", "source": "phone, email" },
+        { "label": "총 구매 금액", "source": "totalPurchaseAmount (서버 집계)" },
+        { "label": "최근 구매일", "source": "lastPurchaseDate" },
+        { "label": "A/S 건수", "source": "asCount (진행중 N)" },
+        { "label": "최근 상담", "source": "lastConsultationDate" },
+        { "label": "정품등록", "source": "registrationCount / 보증 유효 여부" }
+      ],
+      "actions": ["정보 편집 (modal)", "+ A/S 접수 (navigate to /4)"]
+    },
+
+    "tabs_implementation": {
+      "library": "자체 Tabs 컴포넌트 (Tailwind, prototype-v2 디자인 토큰 기반)",
+      "lazy_loading": "activeTab 상태에 따라 해당 탭 컴포넌트만 마운트 + react-query로 데이터 페칭",
+      "tabs": [
+        {
+          "id": "purchases",
+          "label": "구매이력",
+          "badge_count": "동적 (purchaseCount)",
+          "api": "GET /api/customers/{id}/purchases?page=0&size=20",
+          "columns": ["주문번호", "주문일", "제품", "모델", "금액", "배송상태", "A/S 연결", "액션"],
+          "actions": ["상세 조회", "+ A/S 접수"]
+        },
+        {
+          "id": "as-history",
+          "label": "A/S이력",
+          "badge_count": "동적 (asCount)",
+          "api": "GET /api/customers/{id}/tickets?page=0&size=20",
+          "columns": ["A/S#", "제품", "유형", "상태", "담당", "접수일", "경과"],
+          "actions": ["상세 이동 (/4?id=xxx)"]
+        },
+        {
+          "id": "consultations",
+          "label": "상담이력",
+          "badge_count": "동적",
+          "api": "GET /api/customers/{id}/consultations?page=0&size=20",
+          "columns": ["일시", "채널", "요약", "담당", "A/S 연결"],
+          "actions": ["상세 보기 (side panel)"]
+        },
+        {
+          "id": "registrations",
+          "label": "정품등록",
+          "badge_count": "동적 (registrationCount)",
+          "api": "GET /api/customers/{id}/registrations",
+          "layout": "카드 그리드 (시리얼, 모델, 보증만료, 쿠폰)",
+          "actions": ["쿠폰 재발급", "보증 연장"]
+        },
+        {
+          "id": "memo",
+          "label": "메모",
+          "api_read": "GET /api/customers/{id}/memos",
+          "api_write": "POST /api/customers/{id}/memos",
+          "layout": "타임라인 형태 (작성자, 시각, 내용)",
+          "actions": ["메모 추가", "메모 삭제"]
+        }
+      ]
+    },
+
+    "state_management": {
+      "pattern": "URL search params + react-query",
+      "phone_in_url": "?phone=010-1234-5678 — 검색 결과 공유 가능, 뒤로가기 시 유지",
+      "active_tab": "useState (URL에 반영하지 않음 — 단일 페이지 내 탭이므로)",
+      "server_state": "react-query queryKey: ['customer', phone], ['customer', id, 'purchases'] 등"
+    },
+
+    "responsive": {
+      "desktop": "프로필 카드 5열 KPI, 탭 가로 배치, 테이블 전체 컬럼",
+      "mobile_520": "프로필 카드 2열 KPI, 탭 가로 스크롤, 테이블 핵심 3컬럼 + 나머지 숨김"
+    },
+
+    "cautions": [
+      "전화번호 검색은 정확 매칭 (LIKE 검색은 Phase 3에서 추가 검토)",
+      "고객 미존재 시 '검색 결과 없음' + 신규 등록 CTA 표시",
+      "탭 전환 시 이전 탭 데이터는 react-query 캐시에 유지 (재렌더링 안함)",
+      "구매이력/A/S이력의 '금액' 필드는 locale 포맷 (Intl.NumberFormat('ko-KR'))",
+      "대량 데이터 (상담이력 402K건) 대응: 서버 페이지네이션 필수, 프론트에서 전체 로드 금지"
+    ]
+  },
+
+  "implementation_order": {
+    "title": "Phase 2 구현 순서 (권장)",
+    "steps": [
+      "1. npm install: axios, @tanstack/react-query, zustand, zod, dayjs, react-hook-form",
+      "2. src/api/client.ts 생성 (axios 인스턴스 + interceptor 뼈대)",
+      "3. src/stores/authStore.ts 생성 (zustand, 로그인 상태, 토큰 관리)",
+      "4. /login 페이지 + RequireAuth 가드 + router 수정",
+      "5. Electron preload/main 확장 (secureStore IPC)",
+      "6. src/api/customer.ts + src/hooks/queries/useCustomer.ts 생성",
+      "7. CustomerPage 구현: SearchBar -> ProfileCard -> Tabs 순서",
+      "8. 각 탭 컴포넌트 구현 (PurchaseHistoryTab 우선)",
+      "9. 반응형 QA (520px breakpoint)",
+      "10. Electron 빌드 + 웹 빌드 검증"
+    ]
+  },
+
+  "spring_api_endpoints_needed": {
+    "title": "Phase 2에서 필요한 Spring Boot API 엔드포인트 (신규/확장)",
+    "endpoints": [
+      { "method": "POST", "path": "/api/auth/login", "body": "{email, password}", "response": "{accessToken, refreshToken, user}", "note": "신규" },
+      { "method": "POST", "path": "/api/auth/refresh", "body": "{refreshToken}", "response": "{accessToken, refreshToken}", "note": "신규" },
+      { "method": "POST", "path": "/api/auth/logout", "body": "{refreshToken}", "response": "204", "note": "신규" },
+      { "method": "GET", "path": "/api/auth/me", "response": "{id, email, name, role, permissions}", "note": "신규" },
+      { "method": "GET", "path": "/api/customers/phone/{phone}", "response": "Customer (프로필+집계)", "note": "기존 확장" },
+      { "method": "GET", "path": "/api/customers/{id}/purchases", "params": "page, size, sort", "response": "Page<PurchaseHistory>", "note": "기존 확장" },
+      { "method": "GET", "path": "/api/customers/{id}/tickets", "params": "page, size", "response": "Page<TicketSummary>", "note": "기존 확장" },
+      { "method": "GET", "path": "/api/customers/{id}/consultations", "params": "page, size", "response": "Page<ConsultationLog>", "note": "기존 확장" },
+      { "method": "GET", "path": "/api/customers/{id}/registrations", "response": "ProductRegistration[]", "note": "기존 확장" },
+      { "method": "GET", "path": "/api/customers/{id}/memos", "response": "Memo[]", "note": "기존 확장" },
+      { "method": "POST", "path": "/api/customers/{id}/memos", "body": "{content}", "response": "Memo", "note": "신규" }
+    ]
+  }
+}
