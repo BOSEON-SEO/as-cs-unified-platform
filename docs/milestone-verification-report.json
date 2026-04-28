@@ -1,0 +1,413 @@
+{
+  "meta": {
+    "document": "Milestone Verification Report",
+    "purpose": "Verify step-2 requirements + step-3 API/DB spec fully cover Milestone acceptance criteria",
+    "createdAt": "2026-04-28",
+    "milestone_goals": [
+      "Goal-A: Auto-assignment ON -> round-robin works",
+      "Goal-B: CostEntry 3-axis CRUD complete",
+      "Goal-C: Shipment outbound + Recall inbound state transitions confirmed"
+    ]
+  },
+
+  "goalA_auto_assignment": {
+    "title": "Goal-A: Auto-Assignment Round-Robin Verification",
+    "milestone_criteria": "Auto-assign toggle ON -> new ticket created -> round-robin selects next available engineer -> ticket status RECEIVED->ASSIGNED -> event ENGINEER_ASSIGNED logged",
+
+    "coverage_score": "92/100",
+
+    "requirement_trace": [
+      {
+        "criterion": "Toggle ON/OFF UI with confirmation dialog",
+        "step2_ref": "feature-requirements-detail.json > AutoAssignToggleBanner.toggle_behavior",
+        "step3_ref": "backend-api-and-schema.json > PUT /api/assignment-rules",
+        "db_ref": "as_assignment_rules.enabled (BOOLEAN)",
+        "status": "FULLY_COVERED",
+        "detail": "ON->OFF: immediate stop + confirm dialog. OFF->ON: immediate start + confirm dialog. PUT updates singleton row."
+      },
+      {
+        "criterion": "Crew pool ON/OFF per member",
+        "step2_ref": "feature-requirements-detail.json > CrewPoolPanel",
+        "step3_ref": "backend-api-and-schema.json > as_assignment_pool table + PUT /api/assignment-rules.crewPool[]",
+        "status": "FULLY_COVERED",
+        "detail": "Each crew member has independent toggle. DB table as_assignment_pool stores user_id + enabled. API accepts crewPool array."
+      },
+      {
+        "criterion": "Round-robin algorithm selects next-in-line",
+        "step3_ref": "backend-api-and-schema.json > round_robin_algorithm.pseudocode (46 lines)",
+        "db_ref": "as_assignment_rules.last_robin_user_id",
+        "status": "FULLY_COVERED",
+        "detail": "Sorts enabled crew by user_id, finds index of last_robin_user_id, picks next. Updates pointer atomically."
+      },
+      {
+        "criterion": "Max capacity enforcement",
+        "step2_ref": "feature-requirements-detail.json > CrewPoolPanel.maxPerAssignee (1-50)",
+        "step3_ref": "backend-api-and-schema.json > algorithm line: candidates.filter(u => u.current_count < rules.max_per_assignee)",
+        "status": "FULLY_COVERED",
+        "detail": "Crew at max capacity skipped. If all at max, assignment returns null (ticket stays RECEIVED)."
+      },
+      {
+        "criterion": "SLA-exceeded skip rule",
+        "step2_ref": "feature-requirements-detail.json > skipSlaExceeded checkbox",
+        "step3_ref": "backend-api-and-schema.json > algorithm: slaExceeded query HAVING cnt >= 2",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Same-customer preference",
+        "step2_ref": "feature-requirements-detail.json > preferSameCustomer checkbox",
+        "step3_ref": "backend-api-and-schema.json > algorithm: prevAssignee lookup",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "ENGINEER_ASSIGNED event auto-logged",
+        "step3_ref": "backend-api-and-schema.json > side_effects: INSERT as_ticket_events (ENGINEER_ASSIGNED, method='auto_round_robin')",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Concurrent ticket creation safety",
+        "step3_ref": "backend-api-and-schema.json > transactional: SERIALIZABLE isolation on as_assignment_rules row",
+        "status": "FULLY_COVERED",
+        "detail": "Row-level lock prevents double-assign when two tickets created simultaneously."
+      },
+      {
+        "criterion": "KPI stats display (today assigned, avg time, violations, remaining)",
+        "step2_ref": "feature-requirements-detail.json > AutoAssignToggleBanner.kpi_row (4 KPIs)",
+        "step3_ref": "backend-api-and-schema.json > GET /api/assignment-rules response includes stats object",
+        "status": "FULLY_COVERED"
+      }
+    ],
+
+    "gaps": [
+      {
+        "id": "GA-01",
+        "severity": "MEDIUM",
+        "finding": "LEAST_LOADED and CAPABILITY_MATCH modes defined in data model but NO algorithm pseudocode provided in step-3. Only ROUND_ROBIN has implementation detail.",
+        "impact": "If user selects LEAST_LOADED or CAPABILITY_MATCH mode, backend has no defined logic.",
+        "recommendation": "For Milestone: implement ROUND_ROBIN only. Mark LEAST_LOADED and CAPABILITY_MATCH as 'Coming Soon' in UI (disabled select option). Add algorithm pseudocode in Phase 4 or later."
+      },
+      {
+        "id": "GA-02",
+        "severity": "LOW",
+        "finding": "Step-2 UI spec references POST /api/tickets/{id}/assign for drag-and-drop. Step-3 backend spec uses PATCH /api/tickets/{id}/assign. HTTP method mismatch.",
+        "recommendation": "Standardize to PATCH (idempotent update of assignee). Update step-2 scenario SC-ASSIGN-3 to use PATCH."
+      },
+      {
+        "id": "GA-03",
+        "severity": "LOW",
+        "finding": "Step-2 lists 9 API endpoints for assignment. Step-3 lists 7. Missing from step-3: POST /api/tickets/{id}/reassign and GET /api/tickets/{id}/assignment-history.",
+        "recommendation": "Reassign can be covered by PATCH /api/tickets/{id}/assign with additional 'reason' field. Assignment-history is available via GET /api/tickets/{id}/events?eventType=ENGINEER_ASSIGNED. No new endpoints needed, but document this mapping."
+      }
+    ],
+
+    "contradictions": [
+      {
+        "id": "CA-01",
+        "documents": ["step-2 feature-requirements SC-ASSIGN-1 step 4", "step-3 backend PUT /api/assignment-rules"],
+        "issue": "Step-2 scenario says '팀장이 토글 클릭 -> PUT /api/assignment-rules { enabled: true }'. But step-3 RBAC says PUT is ADMIN only. 팀장(TEAM_LEAD) cannot toggle.",
+        "resolution": "This is correct by design: only 총괄(ADMIN) can change auto-assign config. 팀장 can VIEW but not modify. Update step-2 scenario to use 총괄 role, or change API RBAC to include TEAM_LEAD."
+      }
+    ],
+
+    "complexity_assessment": {
+      "overall": "MEDIUM-HIGH",
+      "breakdown": {
+        "db_schema": "LOW (2 simple tables, singleton pattern)",
+        "algorithm": "MEDIUM (round-robin with 4 filters, needs SERIALIZABLE transaction)",
+        "api": "LOW (7 straightforward CRUD+action endpoints)",
+        "frontend": "HIGH (3-column layout, drag-and-drop, real-time KPI, toggle animations)",
+        "integration": "MEDIUM (auto-assign triggered by TICKET_CREATED event, needs Spring @EventListener or @TransactionalEventListener)"
+      }
+    }
+  },
+
+  "goalB_cost_3axis": {
+    "title": "Goal-B: CostEntry 3-Axis CRUD Verification",
+    "milestone_criteria": "Create cost entry with axis selection -> dynamic category -> amount -> approval workflow (PENDING->APPROVED/REJECTED) -> monthly summary reflects approved entries only",
+
+    "coverage_score": "95/100",
+
+    "requirement_trace": [
+      {
+        "criterion": "3-axis radio selection (OUR_EXPENSE / CUSTOMER_PAYMENT / VENDOR_COMPENSATION)",
+        "step2_ref": "feature-requirements-detail.json > CostEntryForm.axis field (radio-group)",
+        "step3_ref": "backend-api-and-schema.json > as_cost_entries.axis ENUM(3 values)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Dynamic category based on axis selection",
+        "step2_ref": "feature-requirements-detail.json > CostEntryForm.category.options_dynamic (10 categories across 3 axes)",
+        "step3_ref": "backend-api-and-schema.json > category_validation.allowed_categories (10 categories matching)",
+        "status": "FULLY_COVERED",
+        "detail": "Frontend shows dynamic dropdown. Backend validates axis+category cross-match. Response includes categoryLabel for display."
+      },
+      {
+        "criterion": "Amount in KRW (integer, non-negative)",
+        "step2_ref": "feature-requirements-detail.json > CostEntryForm.amount (min 0, max 99999999, integer)",
+        "step3_ref": "backend-api-and-schema.json > as_cost_entries.amount INT + CHECK(amount >= 0)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Receipt file upload",
+        "step2_ref": "feature-requirements-detail.json > CostEntryForm.receipt (10MB, jpg/png/pdf)",
+        "step3_ref": "backend-api-and-schema.json > POST /api/tickets/{id}/costs accepts multipart + receipt_url column",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Approval workflow: PENDING -> APPROVED by TEAM_LEAD/ADMIN",
+        "step2_ref": "feature-requirements-detail.json > CostApprovalActions.approve (btn-success)",
+        "step3_ref": "backend-api-and-schema.json > PATCH with { status: 'APPROVED' } + approval_state_machine",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Rejection with reason -> re-submit cycle",
+        "step2_ref": "feature-requirements-detail.json > CostApprovalActions.reject (reason minLength 5) + SC-COST-3",
+        "step3_ref": "backend-api-and-schema.json > PATCH { status: 'REJECTED', rejectionReason } + transition REJECTED->PENDING (must change amount/category)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Monthly summary aggregates APPROVED entries only",
+        "step3_ref": "backend-api-and-schema.json > GET /api/costs/summary sql_hint: WHERE status='APPROVED'",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Net cost formula: CUSTOMER_PAYMENT + VENDOR_COMPENSATION - OUR_EXPENSE",
+        "step2_ref": "feature-requirements-detail.json > CostKpiRow.netCost formula",
+        "step3_ref": "backend-api-and-schema.json > net_cost_formula (positive=gain, negative=loss, computed dynamically)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "COST_ADDED / COST_APPROVED events auto-logged",
+        "step3_ref": "backend-api-and-schema.json > POST side_effects: INSERT as_ticket_events",
+        "status": "FULLY_COVERED"
+      }
+    ],
+
+    "gaps": [
+      {
+        "id": "GB-01",
+        "severity": "MEDIUM",
+        "finding": "Step-2 uses Korean category labels in frontend (부품비, 택배비, etc.). Step-3 uses English enum values (PARTS, SHIPPING, etc.). The mapping exists in step-3 category_labels_ko but is NOT referenced by step-2 CostEntryForm.",
+        "recommendation": "Frontend should send English enum (PARTS) to API, display Korean label (부품비) in UI. Add categoryLabel field in API response. Already present in step-3 response example but not explicitly in step-2 data model."
+      }
+    ],
+
+    "contradictions": [],
+
+    "complexity_assessment": {
+      "overall": "MEDIUM",
+      "breakdown": {
+        "db_schema": "LOW (1 table with standard CRUD columns)",
+        "validation": "MEDIUM (axis->category cross-validation, re-submit change detection)",
+        "api": "LOW (6 standard CRUD endpoints)",
+        "frontend": "MEDIUM (dynamic form, approval buttons, monthly summary table, 2 entry points: CostPage + TicketDetail)",
+        "integration": "LOW (straightforward CRUD with event logging)"
+      }
+    }
+  },
+
+  "goalC_shipment_recall": {
+    "title": "Goal-C: Shipment & Recall State Transitions Verification",
+    "milestone_criteria": "Shipment: PREPARING->DISPATCHED(tracking)->DELIVERED(carrier/manual). Recall: REQUESTED->ASSIGNED(driver+SMS)->COMPLETED(grade). Both logged as TicketEvents.",
+
+    "coverage_score": "88/100",
+
+    "requirement_trace": [
+      {
+        "criterion": "Shipment create with auto-fill from customer",
+        "step2_ref": "feature-requirements-detail.json > ShipmentCreatePanel (7 fields, 3 auto-fill)",
+        "step3_ref": "backend-api-and-schema.json > POST /api/shipments (validation for all fields)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "PREPARING -> DISPATCHED auto-transition on tracking_no entry",
+        "step2_ref": "feature-requirements-detail.json > shipment_state_machine.transitions[0] (auto: true)",
+        "step3_ref": "backend-api-and-schema.json > shipment_state_machine.transitions[0] (SET status='DISPATCHED', dispatched_at=NOW())",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "DISPATCHED -> DELIVERED via carrier API or manual mark",
+        "step2_ref": "feature-requirements-detail.json > transition trigger 'carrier API or manual'",
+        "step3_ref": "backend-api-and-schema.json > PATCH /api/shipments/{id} { status: 'DELIVERED' }",
+        "status": "PARTIALLY_COVERED",
+        "detail": "Manual delivery mark is covered. Carrier API auto-polling is deferred to Phase 4 (acceptable for Milestone)."
+      },
+      {
+        "criterion": "CX handover flag and CS/CX confirmation",
+        "step2_ref": "feature-requirements-detail.json > cx_handover (3 statuses: NOT_REQUIRED/PENDING/CONFIRMED)",
+        "step3_ref": "backend-api-and-schema.json > as_shipments.cx_handover ENUM + PATCH for CS_CX confirmation",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Carrier tracking URL generation",
+        "step2_ref": "feature-requirements-detail.json > TrackingLink.url_patterns (4 carriers)",
+        "step3_ref": "backend-api-and-schema.json > GET /api/shipments/{id}/tracking + carrier_url_patterns",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Recall create with driver assignment + SMS notification",
+        "step2_ref": "feature-requirements-detail.json > RecallCreatePanel (9 fields, driver recommendation)",
+        "step3_ref": "backend-api-and-schema.json > POST /api/recalls + side_effect: Send SMS via MailLog",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "REQUESTED -> ASSIGNED on driver set",
+        "step2_ref": "feature-requirements-detail.json > recall_state_machine.transitions[0]",
+        "step3_ref": "backend-api-and-schema.json > recall_state_machine.transitions[0] (guard: driver valid, available, capacity)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "ASSIGNED -> COMPLETED with condition + grade A/B/C",
+        "step2_ref": "feature-requirements-detail.json > transition additional_fields: condition, grade",
+        "step3_ref": "backend-api-and-schema.json > PATCH /api/recalls/{id} { status:'COMPLETED', conditionNote, grade }",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "Overdue detection and TEAM_LEAD notification",
+        "step2_ref": "feature-requirements-detail.json > overdue_tracking (pickupDate < today, daily alert)",
+        "step3_ref": "backend-api-and-schema.json > recall_state_machine.overdue_detection (@Scheduled cron 09:00)",
+        "status": "FULLY_COVERED"
+      },
+      {
+        "criterion": "SHIPMENT_CREATED / PICKUP_SCHEDULED / PICKUP_COMPLETED events logged",
+        "step3_ref": "backend-api-and-schema.json > POST side_effects: INSERT as_ticket_events",
+        "status": "FULLY_COVERED"
+      }
+    ],
+
+    "gaps": [
+      {
+        "id": "GC-01",
+        "severity": "HIGH",
+        "finding": "Shipment and Recall do NOT trigger ticket status changes in the backend spec. Step-2 says 'UPDATE as_tickets SET status=SHIPPING' but step-3 POST /api/shipments side_effects only mention event logging, not ticket status update.",
+        "impact": "Creating a shipment won't advance the 6-step stepper from step 3/4 to step 5. The stepper will show wrong current step.",
+        "recommendation": "Add to POST /api/shipments side_effects: 'If ticket.status IN (IN_PROGRESS, COST_ENTERED) -> UPDATE as_tickets SET status=SHIPPING'. Same for POST /api/recalls. This links the logistics flow back to the ticket lifecycle."
+      },
+      {
+        "id": "GC-02",
+        "severity": "MEDIUM",
+        "finding": "Step-2 recall page has 4 KPI cards (unretrieved, todayAssigned, todayDone, avgDays). Step-3 backend has GET /api/recalls/pending which returns a summary object with these fields. But the summary includes 5 fields (totalPending, overdue, todayAssigned, todayCompleted, avgPickupDays) while step-2 shows only 4 cards. 'overdue' is in step-3 summary but not in step-2 KPI row.",
+        "recommendation": "Add 5th KPI card '지연 건' (overdue count, red) to step-2 RecallPage.kpi_cards. This data is already available from the API."
+      },
+      {
+        "id": "GC-03",
+        "severity": "MEDIUM",
+        "finding": "Step-2 defines recall grade (A/B/C) on COMPLETED but does NOT specify how grade connects to exchange/return processing. CLAUDE.md says 'exchange/return -> 재고 재등록/리퍼브/부품 처리 분기 필수'. The grade should drive this branching.",
+        "recommendation": "Document the grade->action mapping: A=재고 재등록, B=리퍼브, C=부품/폐기. This is defined in prototype-v2 analysis (ExchangeReturnPage) but not linked from recall completion to exchange/return flow in step-2 or step-3."
+      },
+      {
+        "id": "GC-04",
+        "severity": "LOW",
+        "finding": "Step-3 has as_drivers table but no CRUD API for driver management (create/update/delete driver). Only GET /api/drivers for listing.",
+        "recommendation": "Driver management is a settings function (page #15). For Milestone, seed driver data via SQL. Add driver CRUD API in Phase 4 settings page."
+      }
+    ],
+
+    "contradictions": [
+      {
+        "id": "CC-01",
+        "documents": ["step-2 ShipmentCreatePanel", "step-3 POST /api/shipments validation"],
+        "issue": "Step-2 says shipmentType options are ['수리 완료품', '교환 신품', '리퍼브 출고'] (Korean labels). Step-3 says ENUM('REPAIRED','EXCHANGE_NEW','REFURBISHED') (English values). This is consistent pattern (Korean in UI, English in API) but the mapping is not documented in step-2.",
+        "resolution": "Acceptable. Same pattern as CostEntry axis/category. Frontend maps Korean label to English enum value on submit."
+      }
+    ],
+
+    "complexity_assessment": {
+      "overall": "HIGH",
+      "breakdown": {
+        "db_schema": "MEDIUM (3 tables: shipments, recalls, drivers. Foreign keys to tickets and users.)",
+        "state_machine": "MEDIUM (Shipment: 4 states, 4 transitions. Recall: 4 states, 5 transitions. Both simple FSMs.)",
+        "api": "MEDIUM (8 endpoints across shipment+recall+driver. PATCH handles multiple transitions.)",
+        "frontend": "HIGH (2 full pages with tabs, KPI, tables, create panels. Plus integration into TicketDetail step 5.)",
+        "integration": "HIGH (Shipment/recall creation must update parent ticket status. SMS via MailLog. Overdue cron job. Grade->exchange/return branching.)"
+      }
+    }
+  },
+
+  "cross_cutting_issues": {
+    "title": "Cross-Cutting Issues (affect all 3 goals)",
+
+    "issues": [
+      {
+        "id": "X-01",
+        "severity": "HIGH",
+        "area": "Phase 2 foundation incomplete",
+        "finding": "All 3 goals depend on API client (axios), auth (zustand), react-query, and domain types. None of these exist in the current codebase (package.json has only react/react-dom/react-router-dom). Milestone goals CANNOT be verified in a running application until Phase 2 Sprint 0 completes.",
+        "recommendation": "Sprint 0 is the true blocker. Prioritize: F-01 (deps), F-04 (api client), F-05 (auth store), F-07 (types), F-10 (react-query). These 5 tasks unblock all 3 goals."
+      },
+      {
+        "id": "X-02",
+        "severity": "HIGH",
+        "area": "No as_tickets table defined",
+        "finding": "All 3 features reference as_tickets (FK from cost_entries, shipments, recalls; status field for stepper). But the as_tickets DDL is NOT in any step-3 document. The ticket table schema is implied but never explicitly defined.",
+        "recommendation": "Define as_tickets DDL in backend-api-and-schema.json. Core columns: ticket_id, ticket_no, customer_id, product_model, serial_number, symptom, ticket_type, priority, status, assignee_id, created_by, created_at, updated_at."
+      },
+      {
+        "id": "X-03",
+        "severity": "MEDIUM",
+        "area": "TicketEvent table dependency",
+        "finding": "All 3 features log events to as_ticket_events. This table DDL is in ticket-lifecycle-tracking.md (docs) but NOT in backend-api-and-schema.json (step-3). The two documents should cross-reference.",
+        "recommendation": "Add as_ticket_events DDL reference to backend-api-and-schema.json or note 'see ticket-lifecycle-tracking.md for DDL'."
+      },
+      {
+        "id": "X-04",
+        "severity": "MEDIUM",
+        "area": "Notification system undefined",
+        "finding": "Multiple features reference notifications: auto-assign -> notify engineer, CX handover -> notify CS/CX, recall driver -> SMS, cost rejection -> notify creator, overdue -> notify TEAM_LEAD. But there's no notification API or mechanism defined anywhere.",
+        "recommendation": "For Milestone: use existing SMTP/SMS channels (CLAUDE.md mentions 'existing admin SMTP, SMS'). Define POST /api/notifications { recipientId, channel, template, params } in Phase 5. For now, hard-code SMS send in recall creation and email in CX handover."
+      }
+    ]
+  },
+
+  "scoring": {
+    "title": "Final Scoring",
+
+    "per_goal": {
+      "Goal-A (Auto-Assignment)": {
+        "requirements_coverage": 92,
+        "api_spec_completeness": 88,
+        "db_schema_completeness": 95,
+        "implementation_complexity": "MEDIUM-HIGH",
+        "top_risk": "LEAST_LOADED/CAPABILITY_MATCH modes have no algorithm. RBAC contradiction on toggle (ADMIN vs TEAM_LEAD)."
+      },
+      "Goal-B (CostEntry 3-Axis)": {
+        "requirements_coverage": 95,
+        "api_spec_completeness": 95,
+        "db_schema_completeness": 98,
+        "implementation_complexity": "MEDIUM",
+        "top_risk": "Korean/English category mapping not explicit in step-2 UI spec."
+      },
+      "Goal-C (Shipment/Recall)": {
+        "requirements_coverage": 88,
+        "api_spec_completeness": 85,
+        "db_schema_completeness": 90,
+        "implementation_complexity": "HIGH",
+        "top_risk": "Shipment/recall creation does NOT update parent ticket status (step 5 stepper broken). Grade->exchange/return branching undefined."
+      }
+    },
+
+    "overall": {
+      "requirements_coverage_avg": 91.7,
+      "api_spec_completeness_avg": 89.3,
+      "db_schema_completeness_avg": 94.3,
+      "weighted_total": 91,
+      "grade": "A-",
+      "verdict": "Design is comprehensive and implementable. The 91/100 score reflects strong coverage with a few addressable gaps. The most critical gap (GC-01: shipment/recall not updating ticket status) must be fixed before implementation, as it breaks the 6-step stepper flow. The cross-cutting issue X-02 (missing as_tickets DDL) should also be resolved to make the backend spec self-contained."
+    },
+
+    "must_fix_before_implementation": [
+      "GC-01: Add ticket status update (->SHIPPING) to POST /api/shipments and POST /api/recalls side_effects",
+      "X-02: Define as_tickets table DDL explicitly in backend spec",
+      "CA-01: Resolve RBAC contradiction for assignment toggle (ADMIN-only or TEAM_LEAD+)",
+      "GA-01: Mark LEAST_LOADED and CAPABILITY_MATCH as 'Coming Soon' in UI, implement ROUND_ROBIN only"
+    ],
+
+    "nice_to_fix": [
+      "GA-02: Standardize POST->PATCH for /api/tickets/{id}/assign",
+      "GB-01: Document Korean<->English category mapping in step-2",
+      "GC-02: Add 5th KPI card (overdue) to recall page",
+      "GC-03: Document grade->exchange/return action mapping",
+      "X-03: Cross-reference as_ticket_events DDL between documents",
+      "X-04: Define notification mechanism for Phase 5"
+    ]
+  }
+}
