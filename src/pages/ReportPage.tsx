@@ -1,8 +1,10 @@
+/** #13 리포트 */
 export default function ReportPage() {
   return (
     <section>
-      <div className="page-header"><div><h1 className="page-title">리포트</h1><p className="page-desc">설계 중 &mdash; 실무진 컨펌 후 구현</p></div></div>
-      <div className="placeholder-card">설계 중</div>
+      <h1 className="page-title">📑 리포트</h1>
+      <p className="page-desc">설계 중 — 실무진 컨펌 후 구현 예정</p>
+      <div className="placeholder-card mt-5">리포트 모듈은 아직 설계 중입니다</div>
     </section>
   );
 }

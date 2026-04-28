@@ -4,53 +4,54 @@ import type { NavGroup } from '@/types';
 /**
  * 사이드바 메뉴 구조 — prototype-v2 기반 17개 메뉴
  * 6개 카테고리 그룹, 각 아이템은 react-router-dom NavLink
+ * path = /{pageId} 패턴 (router.tsx 와 동일)
  */
 const navGroups: NavGroup[] = [
   {
     groupTitle: '고객 & 상담',
     items: [
-      { pageId: '1',  path: '/customer',      label: '고객 정보 조회',    icon: '👤' },
-      { pageId: '2',  path: '/consultation',   label: '전체 상담 내역',    icon: '💬', badge: 42 },
-      { pageId: '3',  path: '/zendesk',        label: '젠데스크 조회',     icon: '🔗' },
+      { pageId: '1',       path: '/1',       label: '고객 정보 조회',    icon: '👤' },
+      { pageId: '2',       path: '/2',       label: '전체 상담 내역',    icon: '💬', badge: 42 },
+      { pageId: '3',       path: '/3',       label: '젠데스크 조회',     icon: '🔗' },
     ],
   },
   {
     groupTitle: 'A/S 운영',
     items: [
-      { pageId: 'tickets', path: '/tickets',         label: 'A/S 티켓 목록',    icon: '📋', badge: 82 },
-      { pageId: '4',       path: '/tickets/detail',   label: 'A/S 상세 (단계별)', icon: '🛠' },
-      { pageId: '5',       path: '/',                 label: 'A/S 현황 대시보드', icon: '📊', hasDot: true },
-      { pageId: '6',       path: '/cost',             label: 'A/S 비용 추적',    icon: '💰' },
-      { pageId: '7',       path: '/shipment',         label: 'A/S 출고 관리',    icon: '📦', badge: 12 },
-      { pageId: '8',       path: '/recall',           label: '회수 관리',         icon: '🚚', badge: 14 },
+      { pageId: 'tickets', path: '/tickets', label: 'A/S 티켓 목록',    icon: '📋', badge: 82 },
+      { pageId: '4',       path: '/4',       label: 'A/S 상세 (단계별)', icon: '🛠' },
+      { pageId: '5',       path: '/',        label: 'A/S 현황 대시보드', icon: '📊', hasDot: true },
+      { pageId: '6',       path: '/6',       label: 'A/S 비용 추적',    icon: '💰' },
+      { pageId: '7',       path: '/7',       label: 'A/S 출고 관리',    icon: '📦', badge: 12 },
+      { pageId: '8',       path: '/8',       label: '회수 관리',         icon: '🚚', badge: 14 },
     ],
   },
   {
     groupTitle: '제품 & 처리',
     items: [
-      { pageId: '9',  path: '/product-registration', label: '정품등록 · 시리얼', icon: '🏷' },
-      { pageId: '10', path: '/exchange-return',       label: '교환 · 반품',       icon: '🔄' },
+      { pageId: '9',       path: '/9',       label: '정품등록 · 시리얼', icon: '🏷' },
+      { pageId: '10',      path: '/10',      label: '교환 · 반품',       icon: '🔄' },
     ],
   },
   {
     groupTitle: '커뮤니케이션',
     items: [
-      { pageId: '11', path: '/mail-log', label: '이메일 · SMS 로그', icon: '📧' },
+      { pageId: '11',      path: '/11',      label: '이메일 · SMS 로그', icon: '📧' },
     ],
   },
   {
     groupTitle: 'AI 어시스턴트',
     items: [
-      { pageId: 'ai', path: '/ai-support', label: 'AI 의사결정 서포트', icon: '🤖', badge: 'NEW', badgeStyle: 'gradient' },
+      { pageId: 'ai',      path: '/ai',      label: 'AI 의사결정 서포트', icon: '🤖', badge: 'NEW', badgeStyle: 'gradient' },
     ],
   },
   {
     groupTitle: '관리',
     items: [
-      { pageId: '12', path: '/ticket-assign', label: '티켓 배분',   icon: '👥', badge: 5 },
-      { pageId: '13', path: '/report',        label: '리포트',      icon: '📑', badge: '설계 중', badgeStyle: 'muted' },
-      { pageId: '14', path: '/statistics',     label: '전체 통계',   icon: '📈' },
-      { pageId: '15', path: '/settings',       label: '설정',        icon: '⚙' },
+      { pageId: '12',      path: '/12',      label: '티켓 배분',   icon: '👥', badge: 5 },
+      { pageId: '13',      path: '/13',      label: '리포트',      icon: '📑', badge: '설계 중', badgeStyle: 'muted' },
+      { pageId: '14',      path: '/14',      label: '전체 통계',   icon: '📈' },
+      { pageId: '15',      path: '/15',      label: '설정',        icon: '⚙' },
     ],
   },
 ];
@@ -97,7 +98,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       >
         {/* ── Brand ── */}
         <div className="flex items-center justify-between border-b border-white/[.08] px-[18px] py-3.5">
-          <div className="flex items-center gap-2.5">
+          <NavLink to="/" onClick={onClose} className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-violet-500 text-sm font-extrabold text-white">
               A
             </div>
@@ -107,7 +108,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 통합 관리 플랫폼
               </small>
             </div>
-          </div>
+          </NavLink>
           {/* 모바일 닫기 */}
           <button
             onClick={onClose}
