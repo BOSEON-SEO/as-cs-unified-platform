@@ -1,0 +1,188 @@
+{
+  "meta": {
+    "document": "Architecture & Implementation Plan — Step 3 (A/S 상세 페이지)",
+    "phase": "Phase 3",
+    "createdAt": "2026-04-28",
+    "basedOn": [
+      "docs/phase2-technical-design.json",
+      "docs/prototype-v2-analysis.json",
+      "docs/ticket-lifecycle-tracking.md",
+      "docs/milestone-ticket-spec.json"
+    ]
+  },
+
+  "architecture_decisions": {
+
+    "state_management": {
+      "server_state": "@tanstack/react-query (phase2 패턴 유지)",
+      "queryKeys": {
+        "ticket_detail": "['ticket', ticketId]",
+        "ticket_events": "['ticket', ticketId, 'events']",
+        "ticket_costs": "['ticket', ticketId, 'costs']",
+        "ticket_shipments": "['ticket', ticketId, 'shipments']",
+        "ticket_pickups": "['ticket', ticketId, 'pickups']",
+        "ticket_attachments": "['ticket', ticketId, 'attachments']",
+        "engineers_list": "['users', { role: 'AS_ENGINEER' }]"
+      },
+      "local_state": "zustand ticketStore — activeStep(1-6), activeTab, rightPanelOpen, aiPanelOpen",
+      "form_state": "react-hook-form + zod (phase2 패턴 유지) — 각 Step 폼 컴포넌트별 독립 useForm",
+      "rationale": "Step 전환 시 폼 데이터가 유실되지 않도록 각 StepN 컴포넌트는 언마운트 없이 display:none 전환"
+    },
+
+    "api_layer": {
+      "file": "src/api/ticket.ts",
+      "pattern": "phase2의 customerApi 패턴 동일 적용 (axios apiClient 인스턴스 재사용)",
+      "example": {
+        "ticketApi_getById": "apiClient.get<TicketDetail>(`/tickets/${id}`).then(r => r.data)",
+        "ticketApi_advanceStep": "apiClient.put(`/tickets/${id}/step`, { step, payload }).then(r => r.data)",
+        "ticketApi_addCost": "apiClient.post(`/tickets/${id}/cost-entries`, body).then(r => r.data)"
+      },
+      "hooks_file": "src/hooks/queries/useTicket.ts",
+      "mutation_invalidation": "useMutation onSuccess 시 queryClient.invalidateQueries(['ticket', id]) 호출"
+    },
+
+    "ticketevent_trigger_mapping": {
+      "description": "프론트엔드 액션과 자동 TicketEvent 생성 매핑 (서버가 INSERT 담당, FE는 트리거)",
+      "mapping": [
+        { "fe_action": "Step1 폼 저장 (신규 접수)", "server_event": "TICKET_CREATED", "auto": true },
+        { "fe_action": "Step2 배정 저장", "server_event": "ENGINEER_ASSIGNED", "auto": true },
+        { "fe_action": "Step3 '작업 시작' 버튼", "server_event": "WORK_STARTED", "auto": true },
+        { "fe_action": "Step3 처리방향 확정 저장", "server_event": "STATUS_CHANGED (배정→진행중)", "auto": true },
+        { "fe_action": "Step4 비용항목 추가", "server_event": "COST_ADDED", "auto": true },
+        { "fe_action": "Step4 비용항목 수정", "server_event": "COST_UPDATED", "auto": true },
+        { "fe_action": "Step5 출고 등록", "server_event": "SHIPMENT_CREATED + (첫 고객향이면 FIRST_RESPONSE)", "auto": true },
+        { "fe_action": "Step5 회수 요청", "server_event": "PICKUP_SCHEDULED", "auto": true },
+        { "fe_action": "Step6 완료 처리 + 이메일", "server_event": "TICKET_CLOSED + EMAIL_SENT", "auto": true },
+        { "fe_action": "Step6 완료 처리 + SMS", "server_event": "TICKET_CLOSED + SMS_SENT", "auto": true },
+        { "fe_action": "이메일 발송 버튼 (어느 단계든)", "server_event": "EMAIL_SENT (+ FIRST_RESPONSE if first)", "auto": true },
+        { "fe_action": "전화 통화 기록 수동 입력", "server_event": "PHONE_CALL_LOGGED", "manual": true },
+        { "fe_action": "티켓 상세 페이지 진입 (debounce 5분)", "server_event": "DETAIL_VIEWED", "auto": true },
+        { "fe_action": "첨부파일 업로드", "server_event": "ATTACHMENT_UPLOADED", "auto": true },
+        { "fe_action": "AI 패널 제안 조회", "server_event": "LLM_SUGGESTION_VIEWED", "auto": true }
+      ]
+    },
+
+    "stepper_ui_pattern": {
+      "component": "src/components/ticket/TicketStepper.tsx",
+      "state_source": "서버 ticket.currentStep + ticket.completedSteps[] (FE에서 가공)",
+      "visual_states": {
+        "done": "체크 아이콘 + 완료 색상 (green-600)",
+        "active": "현재 단계 강조 (primary-600 + 링 애니메이션)",
+        "pending": "회색 (slate-300)"
+      },
+      "click_behavior": "완료된 단계는 클릭하여 이력 조회 가능 (읽기 전용 모드), 미래 단계는 클릭 불가",
+      "mobile_adaptation": "세로 스텝퍼 (좌측 타임라인 형태) — 수평 스텝퍼는 520px 이하에서 overflow 발생"
+    },
+
+    "conditional_rendering_step5": {
+      "description": "Step5 폼은 3단계 처리방향(resolutionType)에 따라 다른 UI 렌더링",
+      "resolutionType_REPAIR": "수리 완료 → 출고 폼 (수신인, 주소, 택배사, 송장번호)",
+      "resolutionType_EXCHANGE": "교환 → 교환품 출고 폼 + 원품 회수 폼 병행",
+      "resolutionType_RETURN": "반품 → 회수 완료 확인 + 환불 금액 입력 + 검수(A/B/C) 트리거",
+      "resolutionType_OTHER": "기타 → 자유 메모 + 출고 선택적"
+    },
+
+    "rbac_enforcement": {
+      "step2_assignment": "<Can permission='ticket:assign'> 로 감싸기 — CS_CX는 읽기 전용",
+      "step4_cost_approve": "<Can permission='cost:approve'> — TEAM_LEAD 이상만",
+      "step6_close": "AS_ENGINEER 이상 — CS_CX 불가",
+      "ai_panel": "모든 역할 조회 가능 (suggestion only), 발송 버튼 없음",
+      "pattern": "phase2 RequireAuth + Can 컴포넌트 패턴 동일 적용"
+    },
+
+    "maillog_enforcement": {
+      "rule": "이메일/SMS 발송 시 MailLog 자동 생성 필수 (도메인 규칙)",
+      "implementation": "서버 POST /api/tickets/{id}/close 또는 이메일 발송 API 내부에서 MailLog INSERT 원자적 처리",
+      "fe_check": "발송 후 toast 알림에 'MailLog #{id} 기록됨' 표시로 검증 가능하게"
+    }
+  },
+
+  "implementation_plan": {
+    "estimated_duration": "3–4일 (FE) + 2일 (Spring API 신규 엔드포인트) = 약 5–6일",
+    "steps": [
+      {
+        "order": 1,
+        "task": "src/api/ticket.ts 생성 + src/hooks/queries/useTicket.ts 작성",
+        "duration": "0.5일",
+        "notes": "phase2의 customer API 패턴 복사 후 ticket 도메인으로 교체. Mock 데이터로 FE 독립 개발 시작."
+      },
+      {
+        "order": 2,
+        "task": "TicketStepper 컴포넌트 + 기본 레이아웃 (KpiBar, RightPanel 뼈대)",
+        "duration": "0.5일",
+        "notes": "prototype-v2 디자인 토큰(색상, 폰트, 보더) 그대로 적용. 모바일 세로 스텝퍼 우선 구현."
+      },
+      {
+        "order": 3,
+        "task": "Step1~Step3 폼 컴포넌트 구현 (react-hook-form + zod)",
+        "duration": "1일",
+        "notes": "Step3 AI 제안 패널은 목업으로 우선 대체. 처리방향 선택 시 Step5 조건부 흐름 상태 zustand에 저장."
+      },
+      {
+        "order": 4,
+        "task": "TimelineTab 구현 (ticket-lifecycle-tracking.md 기반)",
+        "duration": "0.5일",
+        "notes": "이벤트 타입별 아이콘/색상 매핑. 구간 소요시간 표시. 수동 이벤트 추가 폼 포함."
+      },
+      {
+        "order": 5,
+        "task": "Step4 (비용 3축) + CostTab 구현",
+        "duration": "0.5일",
+        "notes": "3축 구분을 색상 코드로 시각화 (지출=red, 수납=green, 보상=violet). 팀장 승인 버튼 Can 래핑."
+      },
+      {
+        "order": 6,
+        "task": "Step5 (출고/회수 조건부) + ShipmentTab + PickupTab",
+        "duration": "0.5일",
+        "notes": "resolutionType 분기 로직 구현. 파일 첨부는 Electron IPC open-file-dialog 연동."
+      },
+      {
+        "order": 7,
+        "task": "Step6 (종료) + MailLog 발송 연동 + AI 패널 실 연동",
+        "duration": "0.5일",
+        "notes": "완료 알림 채널 선택 UI. LLM API 연동 (Tailscale VPN). suggestion 수정 후 발송 검토 flow."
+      },
+      {
+        "order": 8,
+        "task": "RBAC 검증 + 반응형 QA + Electron 빌드 확인",
+        "duration": "0.5일",
+        "notes": "역할별 시나리오 9가지(AS_ENGINEER/CS_CX/TEAM_LEAD/ADMIN × 각 단계) 수동 검증."
+      }
+    ]
+  },
+
+  "spring_api_new_endpoints": {
+    "P0_required_for_fe": [
+      { "method": "GET",  "path": "/api/tickets/{id}",             "response": "TicketDetail (step, assignee, customer, product, symptoms, resolutionType, costs[], shipments[], pickups[])" },
+      { "method": "PUT",  "path": "/api/tickets/{id}/step",        "body": "{ step: number, payload: object }", "note": "step 전진 시 TicketEvent 자동 INSERT" },
+      { "method": "POST", "path": "/api/tickets/{id}/assignment",  "body": "{ assigneeId, dueDate }", "note": "ENGINEER_ASSIGNED 이벤트 자동 생성" },
+      { "method": "POST", "path": "/api/tickets/{id}/diagnosis",   "body": "{ diagnosisNote, resolutionType }", "note": "WORK_STARTED + STATUS_CHANGED 이벤트 자동 생성" },
+      { "method": "GET",  "path": "/api/tickets/{id}/events",      "params": "page, size", "response": "Page<TicketEvent>" },
+      { "method": "POST", "path": "/api/tickets/{id}/events",      "body": "{ eventType, payload }", "note": "수동 이벤트 (PHONE_CALL_LOGGED 등)" },
+      { "method": "POST", "path": "/api/tickets/{id}/cost-entries","body": "{ axis, amount, description, evidenceFileId? }", "note": "COST_ADDED 자동" },
+      { "method": "POST", "path": "/api/tickets/{id}/shipments",   "body": "{ recipient, address, carrier, trackingNo, shipmentType }", "note": "SHIPMENT_CREATED 자동" },
+      { "method": "POST", "path": "/api/tickets/{id}/pickups",     "body": "{ driverId, scheduledDate, method, note }", "note": "PICKUP_SCHEDULED 자동" },
+      { "method": "POST", "path": "/api/tickets/{id}/close",       "body": "{ resolutionSummary, notifyChannels[], draftContent? }", "note": "TICKET_CLOSED + EMAIL_SENT/SMS_SENT + MailLog 원자적" },
+      { "method": "GET",  "path": "/api/users",                    "params": "role=AS_ENGINEER", "response": "User[] (배정 드롭다운용)" }
+    ],
+    "P1_ai_support": [
+      { "method": "GET",  "path": "/api/ai/similar-cases",  "params": "ticketId, limit=5", "note": "Tailscale VPN → local Claude API" },
+      { "method": "POST", "path": "/api/ai/draft-reply",    "body": "{ ticketId, channel, tone }", "note": "답변 초안 생성 — suggestion만, 자동 발송 금지" },
+      { "method": "POST", "path": "/api/ai/log-suggestion", "body": "{ ticketId, suggestionId, accepted }", "note": "LLM_SUGGESTION_VIEWED 이벤트" }
+    ]
+  },
+
+  "design_tokens_compliance": {
+    "note": "prototype-v2-analysis.json designTokens 그대로 적용. 신규 색상 추가 금지.",
+    "cost_axis_colors": {
+      "OUR_EXPENSE": "danger (#EF4444) — 우리 지출",
+      "CUSTOMER_PAYMENT": "success (#10B981) — 고객 수납",
+      "VENDOR_COMPENSATION": "violet (#8B5CF6) — 본사 보상"
+    },
+    "stepper_colors": {
+      "done": "#10B981 (success)",
+      "active": "#1E40AF (primary)",
+      "pending": "#94A3B8 (textMuted)"
+    }
+  }
+}
