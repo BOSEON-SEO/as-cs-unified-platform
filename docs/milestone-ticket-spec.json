@@ -1,0 +1,170 @@
+{
+  "meta": {
+    "document": "Milestone Ticket Spec — Step 3",
+    "milestone_id": "21a73e08-3ba6-44b7-9abb-15ff517c7622",
+    "last_task_id": "6ac9c898-f7d6-4082-8227-6ff3c84b69f3",
+    "phase": "Phase 3: A/S 상세 페이지 (6단계 스텝퍼)",
+    "pageId": "4",
+    "pageTitle": "A/S 상세 (단계별)",
+    "createdAt": "2026-04-28",
+    "status": "설계 검토 중"
+  },
+
+  "scope": {
+    "summary": "A/S 티켓 상세 페이지 전면 구현. 6단계 스텝퍼 UI, TicketEvent 기반 타임라인, 비용 3축 입력, 출고/회수 연결, AI 서포트 패널을 포함한다.",
+    "in_scope": [
+      "6단계 스텝퍼 컴포넌트 및 상태 전환 로직",
+      "TicketEvent 자동/수동 생성 (프론트엔드 트리거)",
+      "비용 3축 입력 폼 (지출/수납/본사보상)",
+      "출고 등록 사이드 패널 (송장번호, 택배사)",
+      "회수 요청 사이드 패널 (기사 배정)",
+      "AI 의사결정 서포트 패널 (유사 케이스, 답변 초안 — suggestion only)",
+      "우측 패널: 고객정보, 제품정보, 증상분류, 처리메모",
+      "5개 탭: 통합 타임라인, 비용 내역, 출고 내역, 회수 내역, 첨부파일",
+      "역할별 액션 버튼 노출/비노출 (RequireAuth + Can 컴포넌트)",
+      "Electron + 웹 반응형 양쪽 지원"
+    ],
+    "out_of_scope": [
+      "A/S 목록 페이지 (pageId: tickets) — Phase 3 이전 구현",
+      "비용 승인 워크플로우 상세 — 별도 티켓",
+      "리포트 PDF 생성 — Phase 5",
+      "택배사 API 실시간 배송 추적 자동화 — Phase 4",
+      "LLM 답변 자동 발송 (절대 금지 — suggestion만)"
+    ]
+  },
+
+  "steps_definition": {
+    "overview": "6단계는 순차 진행이 원칙이나 비용 입력(4단계)은 3단계 이후 언제든 가능. 담당자 역할에 따라 활성화 가능한 단계가 제한됨.",
+    "steps": [
+      {
+        "step": 1,
+        "label": "접수",
+        "goal": "A/S 접수 기본정보 확정",
+        "required_data": ["고객 확인 (전화번호 조회)", "제품 확인 (시리얼/모델)", "증상 입력", "접수 유형 선택 (수리/교환/반품/기타)", "우선도 설정"],
+        "trigger_events": ["TICKET_CREATED"],
+        "allowed_roles": ["AS_ENGINEER", "CS_CX", "TEAM_LEAD", "ADMIN"],
+        "completion_condition": "고객ID + 제품ID + 증상 + 접수유형 모두 입력됨"
+      },
+      {
+        "step": 2,
+        "label": "배정",
+        "goal": "담당 A/S 엔지니어 배정",
+        "required_data": ["담당 엔지니어 선택", "예상 처리 기한"],
+        "trigger_events": ["ENGINEER_ASSIGNED"],
+        "allowed_roles": ["TEAM_LEAD", "ADMIN"],
+        "completion_condition": "assigneeId 설정됨",
+        "ux_note": "자동 배정 모드(페이지 12)와 연동 — 자동 배정 ON 시 이 단계는 시스템이 완료"
+      },
+      {
+        "step": 3,
+        "label": "진단 / 처리 결정",
+        "goal": "제품 증상 진단 및 처리 방향 확정",
+        "required_data": ["진단 결과 (증상 원인)", "처리 방향 결정: 수리 / 교환 / 반품 / 기타", "AI 유사 케이스 참고 (suggestion)"],
+        "trigger_events": ["WORK_STARTED", "STATUS_CHANGED"],
+        "allowed_roles": ["AS_ENGINEER", "TEAM_LEAD", "ADMIN"],
+        "completion_condition": "처리 방향(resolutionType) 확정됨",
+        "ux_note": "처리 방향이 5단계 출고/회수 흐름을 결정함. 교환→교환품 출고, 반품→환불 트리거, 수리→수리 후 출고",
+        "ai_support": "진단 입력 시 유사 케이스 자동 제안, 추정 원인 순위 표시"
+      },
+      {
+        "step": 4,
+        "label": "비용 입력",
+        "goal": "3축 비용 산정 및 기록",
+        "required_data": [
+          "지출 (우리 비용): 부품비, 인건비 등",
+          "수납 (고객 청구): 수리비, 점검비",
+          "본사 보상 (vendor compensation): 보증 내 수리 등"
+        ],
+        "trigger_events": ["COST_ADDED", "COST_UPDATED"],
+        "allowed_roles": ["AS_ENGINEER", "TEAM_LEAD", "ADMIN"],
+        "completion_condition": "최소 1개 비용 축에 항목이 존재 (또는 0원 명시 확인)",
+        "ux_note": "3단계 이후 언제든 항목 추가 가능. 승인(COST_APPROVED)은 팀장만 가능."
+      },
+      {
+        "step": 5,
+        "label": "출고 / 회수",
+        "goal": "제품 발송 또는 회수 처리",
+        "sub_flows": {
+          "repair_or_exchange": "수리완료/교환 → 출고 등록 (수신인, 주소, 택배사, 송장번호) → CX 인계",
+          "return": "반품 → 회수 완료 확인 → 환불 트리거 → 재고 처리 분기 (A/B/C)",
+          "pickup_needed": "회수 미완료 → 기사 배정 → 회수 예약 → 회수 완료"
+        },
+        "trigger_events": ["SHIPMENT_CREATED", "SHIPMENT_DISPATCHED", "PICKUP_SCHEDULED", "PICKUP_COMPLETED"],
+        "allowed_roles": ["AS_ENGINEER", "TEAM_LEAD", "ADMIN"],
+        "completion_condition": "출고 송장 등록 완료 OR 회수 완료 확인됨",
+        "ux_note": "3단계 처리결정(resolutionType)에 따라 보이는 폼이 달라짐 (조건부 렌더링)"
+      },
+      {
+        "step": 6,
+        "label": "종료",
+        "goal": "티켓 완료 처리 및 고객 알림",
+        "required_data": ["종료 사유 선택", "처리 요약 메모", "완료 알림 채널 선택 (이메일/SMS)"],
+        "trigger_events": ["TICKET_CLOSED", "EMAIL_SENT OR SMS_SENT", "FIRST_RESPONSE (해당하는 경우)"],
+        "allowed_roles": ["AS_ENGINEER", "TEAM_LEAD", "ADMIN"],
+        "completion_condition": "TICKET_CLOSED 이벤트 기록됨",
+        "ux_note": "완료 알림 발송 시 MailLog 자동 생성 필수. LLM 답변 초안은 suggestion만 — 직접 발송 금지."
+      }
+    ]
+  },
+
+  "required_apis": [
+    { "method": "GET",  "path": "/api/tickets/{id}",                  "desc": "티켓 상세 (현재 step, 고객/제품 포함)", "priority": "P0" },
+    { "method": "PUT",  "path": "/api/tickets/{id}/step",             "desc": "단계 전진/후퇴", "priority": "P0" },
+    { "method": "POST", "path": "/api/tickets/{id}/assignment",        "desc": "엔지니어 배정", "priority": "P0" },
+    { "method": "POST", "path": "/api/tickets/{id}/diagnosis",         "desc": "진단결과 + 처리방향 기록", "priority": "P0" },
+    { "method": "GET",  "path": "/api/tickets/{id}/events",           "desc": "TicketEvent 목록 (타임라인)", "priority": "P0" },
+    { "method": "POST", "path": "/api/tickets/{id}/events",           "desc": "수동 이벤트 기록 (PHONE_CALL 등)", "priority": "P0" },
+    { "method": "POST", "path": "/api/tickets/{id}/cost-entries",     "desc": "비용 항목 추가", "priority": "P0" },
+    { "method": "PUT",  "path": "/api/tickets/{id}/cost-entries/{cid}","desc": "비용 항목 수정", "priority": "P1" },
+    { "method": "POST", "path": "/api/tickets/{id}/shipments",        "desc": "출고 등록", "priority": "P0" },
+    { "method": "POST", "path": "/api/tickets/{id}/pickups",          "desc": "회수 요청", "priority": "P0" },
+    { "method": "POST", "path": "/api/tickets/{id}/close",            "desc": "티켓 종료 (알림 포함)", "priority": "P0" },
+    { "method": "GET",  "path": "/api/users?role=AS_ENGINEER",        "desc": "배정 가능 엔지니어 목록", "priority": "P0" },
+    { "method": "GET",  "path": "/api/ai/similar-cases",             "desc": "유사 케이스 조회 (suggestion)", "priority": "P1" },
+    { "method": "POST", "path": "/api/ai/draft-reply",               "desc": "답변 초안 생성 (suggestion)", "priority": "P1" }
+  ],
+
+  "component_structure": {
+    "TicketDetailPage": {
+      "path": "src/pages/TicketDetail/index.tsx",
+      "children": [
+        "TicketKpiBar (경과, SLA, 담당, 순비용, 소통 횟수)",
+        "TicketStepper (6단계 시각화)",
+        "TicketTabPanel (5탭)",
+        "TicketRightPanel (고객/제품/증상/메모)",
+        "AiSupportPanel (우측 슬라이드)",
+        "StepActionBar (현재 단계 액션 버튼)"
+      ]
+    },
+    "TicketStepper": {
+      "path": "src/components/ticket/TicketStepper.tsx",
+      "props": "currentStep: 1-6, completedSteps: number[], onStepClick: (step) => void"
+    },
+    "StepForms": {
+      "step1": "src/components/ticket/steps/Step1Reception.tsx",
+      "step2": "src/components/ticket/steps/Step2Assignment.tsx",
+      "step3": "src/components/ticket/steps/Step3Diagnosis.tsx",
+      "step4": "src/components/ticket/steps/Step4Cost.tsx",
+      "step5": "src/components/ticket/steps/Step5Shipment.tsx",
+      "step6": "src/components/ticket/steps/Step6Close.tsx"
+    },
+    "TabPanels": {
+      "tab1": "src/components/ticket/tabs/TimelineTab.tsx",
+      "tab2": "src/components/ticket/tabs/CostTab.tsx",
+      "tab3": "src/components/ticket/tabs/ShipmentTab.tsx",
+      "tab4": "src/components/ticket/tabs/PickupTab.tsx",
+      "tab5": "src/components/ticket/tabs/AttachmentTab.tsx"
+    }
+  },
+
+  "dod": [
+    "6단계 스텝퍼 클릭/완료 상태 시각화 (done/active/pending)",
+    "각 단계 폼 저장 시 해당 TicketEvent 자동 기록 확인",
+    "비용 3축 항목 추가/수정/삭제 정상 동작",
+    "출고 등록 → MailLog 자동 생성 확인",
+    "AI 패널 suggestion 표시 — 발송 버튼 없음 확인 (발송은 별도 검토 후)",
+    "역할별 버튼 노출: CS_CX는 읽기 전용, TEAM_LEAD는 배정 가능",
+    "Electron 빌드 + 모바일 520px 반응형 QA 완료",
+    "React Query queryKey 충돌 없음 확인 (['ticket', id, 'events'] 등)"
+  ]
+}
