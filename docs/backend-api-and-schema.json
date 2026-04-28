@@ -1,0 +1,932 @@
+{
+  "meta": {
+    "document": "Backend API Spec & DB Schema",
+    "scope": "(1) Auto-Assignment Round-Robin, (2) CostEntry 3-Axis CRUD, (3) Shipment State Machine",
+    "createdAt": "2026-04-28",
+    "db": "MySQL 8.0+ (InnoDB), existing shared DB, schema-add only",
+    "framework": "Spring Boot 3.x + Spring Security + JPA/Hibernate"
+  },
+
+  "section1_auto_assignment": {
+    "title": "(1) Auto-Assignment Round-Robin",
+
+    "db_schema": {
+      "table_assignment_rules": {
+        "name": "as_assignment_rules",
+        "description": "Singleton config row (id=1). Stores auto-assignment global settings.",
+        "ddl": [
+          "CREATE TABLE as_assignment_rules (",
+          "  id              TINYINT UNSIGNED NOT NULL DEFAULT 1 PRIMARY KEY,",
+          "  enabled         BOOLEAN NOT NULL DEFAULT FALSE,",
+          "  mode            ENUM('ROUND_ROBIN','LEAST_LOADED','CAPABILITY_MATCH') NOT NULL DEFAULT 'ROUND_ROBIN',",
+          "  max_per_assignee INT UNSIGNED NOT NULL DEFAULT 20,",
+          "  skip_sla_exceeded BOOLEAN NOT NULL DEFAULT TRUE,",
+          "  prefer_same_customer BOOLEAN NOT NULL DEFAULT FALSE,",
+          "  last_robin_user_id BIGINT UNSIGNED NULL COMMENT 'Last assigned user for round-robin rotation',",
+          "  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
+          "  updated_by      BIGINT UNSIGNED NULL,",
+          "  CONSTRAINT chk_singleton CHECK (id = 1)",
+          ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        ]
+      },
+      "table_assignment_pool": {
+        "name": "as_assignment_pool",
+        "description": "Which users are in the auto-assignment pool and their ON/OFF status.",
+        "ddl": [
+          "CREATE TABLE as_assignment_pool (",
+          "  pool_id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+          "  user_id         BIGINT UNSIGNED NOT NULL,",
+          "  enabled         BOOLEAN NOT NULL DEFAULT TRUE,",
+          "  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+          "  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
+          "  UNIQUE INDEX uq_pool_user (user_id),",
+          "  CONSTRAINT fk_pool_user FOREIGN KEY (user_id) REFERENCES users(id)",
+          ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        ]
+      }
+    },
+
+    "round_robin_algorithm": {
+      "description": "Server-side algorithm executed on TICKET_CREATED when auto-assign is enabled",
+      "pseudocode": [
+        "function autoAssign(ticketId):",
+        "  rules = SELECT * FROM as_assignment_rules WHERE id=1",
+        "  if (!rules.enabled) return null",
+        "",
+        "  pool = SELECT ap.user_id, COUNT(t.ticket_id) AS current_count",
+        "         FROM as_assignment_pool ap",
+        "         LEFT JOIN as_tickets t ON t.assignee_id = ap.user_id",
+        "              AND t.status NOT IN ('CLOSED','CANCELLED')",
+        "         WHERE ap.enabled = TRUE",
+        "         GROUP BY ap.user_id",
+        "         ORDER BY ap.user_id",
+        "",
+        "  if (pool is empty) return null  -- no available crew",
+        "",
+        "  -- Apply filters",
+        "  candidates = pool.filter(u => u.current_count < rules.max_per_assignee)",
+        "",
+        "  if (rules.skip_sla_exceeded):",
+        "    slaExceeded = SELECT assignee_id, COUNT(*) AS cnt",
+        "                  FROM as_tickets",
+        "                  WHERE status NOT IN ('CLOSED','CANCELLED')",
+        "                    AND sla_percent > 100",
+        "                  GROUP BY assignee_id",
+        "                  HAVING cnt >= 2",
+        "    candidates = candidates.filter(u => u.user_id NOT IN slaExceeded)",
+        "",
+        "  if (rules.prefer_same_customer):",
+        "    customer = ticket.customer_id",
+        "    prevAssignee = SELECT assignee_id FROM as_tickets",
+        "                   WHERE customer_id = customer AND ticket_id != ticketId",
+        "                   ORDER BY created_at DESC LIMIT 1",
+        "    if (prevAssignee IN candidates):",
+        "      return assign(ticketId, prevAssignee, 'auto_same_customer')",
+        "",
+        "  if (candidates is empty) return null  -- all at capacity",
+        "",
+        "  -- Round-robin: pick next after last_robin_user_id",
+        "  sortedIds = candidates.map(u => u.user_id).sort()",
+        "  lastIdx = sortedIds.indexOf(rules.last_robin_user_id)",
+        "  nextIdx = (lastIdx + 1) % sortedIds.length",
+        "  selectedUserId = sortedIds[nextIdx]",
+        "",
+        "  -- Update rotation pointer",
+        "  UPDATE as_assignment_rules SET last_robin_user_id = selectedUserId WHERE id=1",
+        "",
+        "  return assign(ticketId, selectedUserId, 'auto_round_robin')"
+      ],
+      "transactional": "Entire function runs in @Transactional with SERIALIZABLE isolation on as_assignment_rules row to prevent double-assign under concurrent ticket creation."
+    },
+
+    "api_endpoints": [
+      {
+        "endpoint": "GET /api/assignment-rules",
+        "description": "Get current auto-assignment configuration + pool + KPI stats",
+        "auth": "TEAM_LEAD, ADMIN",
+        "response_200": {
+          "enabled": true,
+          "mode": "ROUND_ROBIN",
+          "maxPerAssignee": 20,
+          "skipSlaExceeded": true,
+          "preferSameCustomer": false,
+          "crewPool": [
+            { "userId": 101, "name": "박수리", "enabled": true, "currentCount": 12 },
+            { "userId": 102, "name": "김기술", "enabled": true, "currentCount": 15 },
+            { "userId": 103, "name": "윤기사", "enabled": false, "currentCount": 0 }
+          ],
+          "stats": {
+            "todayAutoAssigned": 37,
+            "avgAssignTimeMs": 820,
+            "ruleViolations": 2,
+            "unassignedRemaining": 5
+          }
+        }
+      },
+      {
+        "endpoint": "PUT /api/assignment-rules",
+        "description": "Update auto-assignment configuration (enabled, mode, pool, settings)",
+        "auth": "ADMIN only",
+        "request_body": {
+          "enabled": true,
+          "mode": "ROUND_ROBIN",
+          "maxPerAssignee": 20,
+          "skipSlaExceeded": true,
+          "preferSameCustomer": false,
+          "crewPool": [
+            { "userId": 101, "enabled": true },
+            { "userId": 102, "enabled": true },
+            { "userId": 103, "enabled": false }
+          ]
+        },
+        "validation": {
+          "mode": "Must be one of ROUND_ROBIN, LEAST_LOADED, CAPABILITY_MATCH",
+          "maxPerAssignee": "1..50, integer",
+          "crewPool[].userId": "Must exist in users table with role AS_ENGINEER",
+          "crewPool": "At least 1 crew member must be enabled when enabled=true"
+        },
+        "response_200": "Updated AssignmentRule object (same shape as GET)",
+        "response_400": {
+          "code": "VALIDATION_ERROR",
+          "message": "At least one crew member must be enabled",
+          "field": "crewPool"
+        }
+      },
+      {
+        "endpoint": "POST /api/assignment-rules/execute",
+        "description": "Manually trigger auto-assign for all currently unassigned tickets",
+        "auth": "TEAM_LEAD, ADMIN",
+        "request_body": "{}",
+        "response_200": {
+          "assigned": 5,
+          "skipped": 2,
+          "skippedReasons": [
+            { "ticketId": 2650, "reason": "All crew at max capacity" },
+            { "ticketId": 2651, "reason": "No enabled crew member" }
+          ]
+        },
+        "side_effects": [
+          "For each assigned ticket: INSERT as_ticket_events (ENGINEER_ASSIGNED, method='auto_round_robin')",
+          "For each assigned ticket: UPDATE as_tickets SET assignee_id, status='ASSIGNED'"
+        ]
+      },
+      {
+        "endpoint": "GET /api/assignees/workload",
+        "description": "Get workload stats for all A/S engineers",
+        "auth": "TEAM_LEAD, ADMIN",
+        "response_200": [
+          {
+            "userId": 101,
+            "name": "박수리",
+            "currentCount": 12,
+            "maxCount": 20,
+            "weekCompleted": 6,
+            "avgResolutionDays": 2.4,
+            "slaExceededCount": 1,
+            "responseRate": 92
+          }
+        ]
+      },
+      {
+        "endpoint": "GET /api/tickets/unassigned",
+        "description": "List tickets with status=RECEIVED (no assignee)",
+        "auth": "TEAM_LEAD, ADMIN",
+        "query_params": {
+          "sort": "receivedAt (default) | priority | productModel"
+        },
+        "response_200": [
+          {
+            "ticketId": 2645,
+            "ticketNo": "AS-2645",
+            "customerName": "김민수",
+            "productModel": "WE-300",
+            "ticketType": "REPAIR",
+            "priority": "NORMAL",
+            "receivedAt": "2026-04-28T09:12:00.000Z",
+            "waitingMinutes": 240,
+            "waitingBadge": "red"
+          }
+        ]
+      },
+      {
+        "endpoint": "PATCH /api/tickets/{id}/assign",
+        "description": "Manually assign a ticket to an engineer",
+        "auth": "TEAM_LEAD, ADMIN",
+        "request_body": {
+          "assigneeId": 101,
+          "note": "WE-300 전문 담당"
+        },
+        "validation": {
+          "assigneeId": "Required, must exist in users with role AS_ENGINEER",
+          "ticket.status": "Must be RECEIVED (otherwise 409 Conflict)",
+          "note": "Optional, maxLength 200"
+        },
+        "response_200": "Updated Ticket object with status=ASSIGNED",
+        "response_409": {
+          "code": "ALREADY_ASSIGNED",
+          "message": "Ticket AS-2645 is already assigned to 김기술"
+        },
+        "side_effects": [
+          "UPDATE as_tickets SET assignee_id, status='ASSIGNED', updated_at",
+          "INSERT as_ticket_events (ENGINEER_ASSIGNED, method='manual')",
+          "INSERT as_ticket_events (STATUS_CHANGED, prev='RECEIVED', next='ASSIGNED')"
+        ]
+      },
+      {
+        "endpoint": "POST /api/tickets/batch-assign",
+        "description": "Assign multiple tickets to one engineer at once",
+        "auth": "TEAM_LEAD, ADMIN",
+        "request_body": {
+          "ticketIds": [2645, 2646, 2647],
+          "assigneeId": 103
+        },
+        "validation": {
+          "ticketIds": "Non-empty, max 50, all must have status=RECEIVED",
+          "assigneeId": "Required, must exist, must be in pool or any AS_ENGINEER"
+        },
+        "response_200": {
+          "assigned": 3,
+          "failed": []
+        },
+        "response_207": {
+          "assigned": 2,
+          "failed": [
+            { "ticketId": 2647, "reason": "Already assigned" }
+          ]
+        }
+      }
+    ]
+  },
+
+  "section2_cost_entry": {
+    "title": "(2) CostEntry 3-Axis CRUD",
+
+    "db_schema": {
+      "table_cost_entries": {
+        "name": "as_cost_entries",
+        "ddl": [
+          "CREATE TABLE as_cost_entries (",
+          "  cost_id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+          "  ticket_id       BIGINT UNSIGNED NOT NULL,",
+          "  axis            ENUM('OUR_EXPENSE','CUSTOMER_PAYMENT','VENDOR_COMPENSATION') NOT NULL,",
+          "  category        VARCHAR(50) NOT NULL,",
+          "  amount          INT NOT NULL DEFAULT 0 COMMENT 'Amount in KRW (won), always positive',",
+          "  description     VARCHAR(500) NULL,",
+          "  receipt_url     VARCHAR(500) NULL COMMENT 'S3/storage path for receipt file',",
+          "  status          ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING',",
+          "  rejection_reason VARCHAR(500) NULL,",
+          "  created_by      BIGINT UNSIGNED NOT NULL,",
+          "  approved_by     BIGINT UNSIGNED NULL,",
+          "  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+          "  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
+          "  INDEX idx_cost_ticket (ticket_id),",
+          "  INDEX idx_cost_axis (axis, created_at),",
+          "  INDEX idx_cost_status (status, created_at),",
+          "  INDEX idx_cost_created_by (created_by),",
+          "  CONSTRAINT fk_cost_ticket FOREIGN KEY (ticket_id) REFERENCES as_tickets(ticket_id),",
+          "  CONSTRAINT fk_cost_creator FOREIGN KEY (created_by) REFERENCES users(id),",
+          "  CONSTRAINT fk_cost_approver FOREIGN KEY (approved_by) REFERENCES users(id),",
+          "  CONSTRAINT chk_amount_positive CHECK (amount >= 0)",
+          ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        ]
+      }
+    },
+
+    "category_validation": {
+      "description": "category must match its axis. Server rejects mismatched axis+category.",
+      "allowed_categories": {
+        "OUR_EXPENSE":           ["PARTS", "SHIPPING", "REPAIR_LABOR", "OTHER_EXPENSE"],
+        "CUSTOMER_PAYMENT":      ["REPAIR_CHARGE", "SHIPPING_CHARGE", "OTHER_PAYMENT"],
+        "VENDOR_COMPENSATION":   ["CLAIM_COMPENSATION", "WARRANTY_REPAIR_REIMBURSEMENT", "OTHER_COMPENSATION"]
+      },
+      "category_labels_ko": {
+        "PARTS": "부품비",
+        "SHIPPING": "택배비",
+        "REPAIR_LABOR": "수리비",
+        "OTHER_EXPENSE": "기타 지출",
+        "REPAIR_CHARGE": "수리비 청구",
+        "SHIPPING_CHARGE": "택배비 청구",
+        "OTHER_PAYMENT": "기타 수납",
+        "CLAIM_COMPENSATION": "클레임 보상금",
+        "WARRANTY_REPAIR_REIMBURSEMENT": "무상 수리 보전",
+        "OTHER_COMPENSATION": "기타 보상"
+      }
+    },
+
+    "net_cost_formula": {
+      "formula": "netCost = SUM(CUSTOMER_PAYMENT) + SUM(VENDOR_COMPENSATION) - SUM(OUR_EXPENSE)",
+      "sign_convention": "positive = net gain, negative = net loss",
+      "note": "Computed dynamically on read, NOT stored in DB. Only APPROVED entries included in aggregation."
+    },
+
+    "approval_state_machine": {
+      "states": ["PENDING", "APPROVED", "REJECTED"],
+      "transitions": [
+        { "from": "PENDING",  "to": "APPROVED", "actor": "TEAM_LEAD | ADMIN", "guard": "none",                           "event": "COST_APPROVED" },
+        { "from": "PENDING",  "to": "REJECTED", "actor": "TEAM_LEAD | ADMIN", "guard": "rejection_reason required (>=5 chars)", "event": "COST_UPDATED (status change)" },
+        { "from": "REJECTED", "to": "PENDING",  "actor": "original creator",  "guard": "amount or category must differ from rejected version", "event": "COST_UPDATED (re-submit)" }
+      ],
+      "rules": [
+        "APPROVED is terminal for that entry (no further transitions)",
+        "Only ADMIN can DELETE a cost entry (hard delete, for corrections)",
+        "APPROVED entries are included in monthly summary aggregation",
+        "PENDING and REJECTED entries are excluded from summary"
+      ]
+    },
+
+    "api_endpoints": [
+      {
+        "endpoint": "POST /api/tickets/{ticketId}/costs",
+        "description": "Create a new cost entry for a ticket",
+        "auth": "AS_ENGINEER (own ticket), ADMIN",
+        "request_body": {
+          "axis": "OUR_EXPENSE",
+          "category": "PARTS",
+          "amount": 15000,
+          "description": "좌측 드라이버 유닛 교체",
+          "receiptFile": "(multipart file, optional)"
+        },
+        "validation": {
+          "axis": "Required, must be one of the 3 axis enum values",
+          "category": "Required, must be in the allowed list for the given axis",
+          "amount": "Required, integer >= 0, max 99999999",
+          "description": "Optional, maxLength 500",
+          "receiptFile": "Optional, max 10MB, types: jpg/png/pdf",
+          "ticket": "Must exist, current user must be the assignee OR have ADMIN role",
+          "ticket.status": "Must be IN_PROGRESS, COST_ENTERED, or SHIPPING (steps 3-5)"
+        },
+        "response_201": {
+          "costId": 501,
+          "ticketId": 2641,
+          "axis": "OUR_EXPENSE",
+          "category": "PARTS",
+          "categoryLabel": "부품비",
+          "amount": 15000,
+          "description": "좌측 드라이버 유닛 교체",
+          "receiptUrl": "/files/receipts/501_receipt.jpg",
+          "status": "PENDING",
+          "rejectionReason": null,
+          "createdBy": 101,
+          "createdByName": "박수리",
+          "approvedBy": null,
+          "createdAt": "2026-04-29T11:30:00.000Z",
+          "updatedAt": "2026-04-29T11:30:00.000Z"
+        },
+        "side_effects": [
+          "INSERT as_ticket_events (COST_ADDED, payload={axis, amount, category})"
+        ],
+        "response_400_examples": [
+          { "code": "INVALID_CATEGORY", "message": "Category PARTS is not valid for axis CUSTOMER_PAYMENT" },
+          { "code": "INVALID_AMOUNT", "message": "Amount must be a non-negative integer" }
+        ]
+      },
+      {
+        "endpoint": "GET /api/tickets/{ticketId}/costs",
+        "description": "List all cost entries for a ticket",
+        "auth": "AS_ENGINEER (own ticket), TEAM_LEAD, ADMIN",
+        "response_200": {
+          "entries": [
+            {
+              "costId": 501,
+              "axis": "OUR_EXPENSE",
+              "category": "PARTS",
+              "categoryLabel": "부품비",
+              "amount": 15000,
+              "status": "APPROVED",
+              "createdByName": "박수리",
+              "createdAt": "2026-04-29T11:30:00.000Z"
+            }
+          ],
+          "summary": {
+            "totalExpense": 15000,
+            "totalPayment": 10000,
+            "totalCompensation": 20000,
+            "netCost": 15000,
+            "pendingCount": 1,
+            "approvedCount": 2,
+            "rejectedCount": 0
+          }
+        }
+      },
+      {
+        "endpoint": "PATCH /api/tickets/{ticketId}/costs/{costId}",
+        "description": "Update cost entry (edit fields OR approve/reject)",
+        "auth": "Creator (edit), TEAM_LEAD (approve/reject), ADMIN (all)",
+        "request_body_edit": {
+          "axis": "OUR_EXPENSE",
+          "category": "SHIPPING",
+          "amount": 5000,
+          "description": "택배비 수정"
+        },
+        "request_body_approve": {
+          "status": "APPROVED"
+        },
+        "request_body_reject": {
+          "status": "REJECTED",
+          "rejectionReason": "영수증 첨부 필요합니다"
+        },
+        "validation_edit": {
+          "who": "Only the original creator can edit, and only when status is PENDING or REJECTED",
+          "axis+category": "Same cross-validation as create",
+          "amount": "Same rules as create"
+        },
+        "validation_approve": {
+          "who": "TEAM_LEAD or ADMIN only",
+          "status": "Current status must be PENDING"
+        },
+        "validation_reject": {
+          "who": "TEAM_LEAD or ADMIN only",
+          "status": "Current status must be PENDING",
+          "rejectionReason": "Required, minLength 5"
+        },
+        "response_200": "Updated CostEntry object",
+        "response_403": { "code": "FORBIDDEN", "message": "Only the original creator can edit this cost entry" },
+        "response_409": { "code": "INVALID_TRANSITION", "message": "Cannot approve a REJECTED entry. Creator must re-submit first." },
+        "side_effects_approve": [
+          "INSERT as_ticket_events (COST_APPROVED, payload={totalOur, totalCustomer, totalVendor})"
+        ],
+        "side_effects_reject": [
+          "INSERT as_ticket_events (COST_UPDATED, payload={costId, status:'REJECTED', reason})"
+        ]
+      },
+      {
+        "endpoint": "DELETE /api/tickets/{ticketId}/costs/{costId}",
+        "description": "Hard-delete a cost entry (corrections only)",
+        "auth": "ADMIN only",
+        "response_204": "No content",
+        "response_403": { "code": "FORBIDDEN", "message": "Only ADMIN can delete cost entries" }
+      },
+      {
+        "endpoint": "GET /api/costs/summary",
+        "description": "Monthly aggregation of approved cost entries",
+        "auth": "TEAM_LEAD, ADMIN",
+        "query_params": {
+          "month": "YYYY-MM (single month) OR",
+          "from": "YYYY-MM (range start)",
+          "to": "YYYY-MM (range end, inclusive)"
+        },
+        "response_200": [
+          {
+            "month": "2026-04",
+            "totalExpense": 2340000,
+            "totalPayment": 890000,
+            "totalCompensation": 1200000,
+            "netCost": -250000,
+            "entryCount": 156
+          },
+          {
+            "month": "2026-03",
+            "totalExpense": 1980000,
+            "totalPayment": 720000,
+            "totalCompensation": 1050000,
+            "netCost": -210000,
+            "entryCount": 132
+          }
+        ],
+        "sql_hint": "SELECT DATE_FORMAT(created_at,'%Y-%m') AS month, SUM(CASE WHEN axis='OUR_EXPENSE' THEN amount ELSE 0 END) AS totalExpense, ... FROM as_cost_entries WHERE status='APPROVED' GROUP BY month ORDER BY month DESC"
+      },
+      {
+        "endpoint": "GET /api/costs",
+        "description": "Paginated list of cost entries across all tickets",
+        "auth": "TEAM_LEAD, ADMIN",
+        "query_params": {
+          "from": "ISO date",
+          "to": "ISO date",
+          "axis": "OUR_EXPENSE | CUSTOMER_PAYMENT | VENDOR_COMPENSATION",
+          "assignee": "userId (filter by ticket assignee)",
+          "status": "PENDING | APPROVED | REJECTED",
+          "page": "0",
+          "size": "20",
+          "sort": "createdAt,desc (default)"
+        },
+        "response_200": {
+          "content": [
+            {
+              "costId": 501,
+              "ticketId": 2641,
+              "ticketNo": "AS-2641",
+              "customerName": "김민수",
+              "axis": "OUR_EXPENSE",
+              "category": "PARTS",
+              "categoryLabel": "부품비",
+              "amount": 15000,
+              "status": "PENDING",
+              "createdByName": "박수리",
+              "createdAt": "2026-04-29T11:30:00.000Z"
+            }
+          ],
+          "totalElements": 156,
+          "totalPages": 8,
+          "page": 0,
+          "size": 20
+        }
+      }
+    ]
+  },
+
+  "section3_shipment": {
+    "title": "(3) Shipment State Machine",
+
+    "db_schema": {
+      "table_shipments": {
+        "name": "as_shipments",
+        "ddl": [
+          "CREATE TABLE as_shipments (",
+          "  shipment_id     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+          "  ticket_id       BIGINT UNSIGNED NOT NULL,",
+          "  recipient_name  VARCHAR(100) NOT NULL,",
+          "  recipient_phone VARCHAR(20) NOT NULL,",
+          "  address         VARCHAR(500) NOT NULL,",
+          "  shipment_type   ENUM('REPAIRED','EXCHANGE_NEW','REFURBISHED') NOT NULL,",
+          "  carrier         VARCHAR(50) NOT NULL,",
+          "  tracking_no     VARCHAR(50) NULL,",
+          "  status          ENUM('PREPARING','DISPATCHED','DELIVERED','CANCELLED') NOT NULL DEFAULT 'PREPARING',",
+          "  cx_handover     ENUM('NOT_REQUIRED','PENDING','CONFIRMED') NOT NULL DEFAULT 'NOT_REQUIRED',",
+          "  note            VARCHAR(500) NULL,",
+          "  created_by      BIGINT UNSIGNED NOT NULL,",
+          "  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+          "  dispatched_at   DATETIME NULL,",
+          "  delivered_at    DATETIME NULL,",
+          "  cancelled_at    DATETIME NULL,",
+          "  cancel_reason   VARCHAR(500) NULL,",
+          "  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
+          "  INDEX idx_ship_ticket (ticket_id),",
+          "  INDEX idx_ship_status (status, created_at),",
+          "  INDEX idx_ship_cx (cx_handover),",
+          "  INDEX idx_ship_tracking (carrier, tracking_no),",
+          "  CONSTRAINT fk_ship_ticket FOREIGN KEY (ticket_id) REFERENCES as_tickets(ticket_id),",
+          "  CONSTRAINT fk_ship_creator FOREIGN KEY (created_by) REFERENCES users(id)",
+          ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        ]
+      },
+      "table_recalls": {
+        "name": "as_recalls",
+        "ddl": [
+          "CREATE TABLE as_recalls (",
+          "  recall_id       BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+          "  ticket_id       BIGINT UNSIGNED NOT NULL,",
+          "  customer_name   VARCHAR(100) NOT NULL,",
+          "  customer_phone  VARCHAR(20) NOT NULL,",
+          "  address         VARCHAR(500) NOT NULL,",
+          "  product_model   VARCHAR(100) NOT NULL,",
+          "  recall_method   ENUM('DRIVER_DIRECT','COURIER') NOT NULL,",
+          "  driver_id       BIGINT UNSIGNED NULL,",
+          "  pickup_date     DATE NOT NULL,",
+          "  status          ENUM('REQUESTED','ASSIGNED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'REQUESTED',",
+          "  condition_note  VARCHAR(500) NULL COMMENT 'Filled on completion',",
+          "  grade           ENUM('A','B','C') NULL COMMENT 'Inspection grade on completion',",
+          "  note            VARCHAR(500) NULL,",
+          "  cancel_reason   VARCHAR(500) NULL,",
+          "  created_by      BIGINT UNSIGNED NOT NULL,",
+          "  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+          "  completed_at    DATETIME NULL,",
+          "  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,",
+          "  INDEX idx_recall_ticket (ticket_id),",
+          "  INDEX idx_recall_status (status, pickup_date),",
+          "  INDEX idx_recall_driver (driver_id, status),",
+          "  INDEX idx_recall_overdue (status, pickup_date),",
+          "  CONSTRAINT fk_recall_ticket FOREIGN KEY (ticket_id) REFERENCES as_tickets(ticket_id),",
+          "  CONSTRAINT fk_recall_creator FOREIGN KEY (created_by) REFERENCES users(id),",
+          "  CONSTRAINT fk_recall_driver FOREIGN KEY (driver_id) REFERENCES as_drivers(driver_id)",
+          ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        ]
+      },
+      "table_drivers": {
+        "name": "as_drivers",
+        "ddl": [
+          "CREATE TABLE as_drivers (",
+          "  driver_id       BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+          "  name            VARCHAR(50) NOT NULL,",
+          "  phone           VARCHAR(20) NOT NULL,",
+          "  region          VARCHAR(100) NULL,",
+          "  max_capacity    INT UNSIGNED NOT NULL DEFAULT 10,",
+          "  available       BOOLEAN NOT NULL DEFAULT TRUE,",
+          "  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,",
+          "  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
+          ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+        ]
+      }
+    },
+
+    "shipment_state_machine": {
+      "states": {
+        "PREPARING":  { "description": "Created, no tracking number yet", "badge": "b-slate" },
+        "DISPATCHED": { "description": "Tracking number entered", "badge": "b-blue" },
+        "DELIVERED":  { "description": "Carrier confirms delivery or manual mark", "badge": "b-green" },
+        "CANCELLED":  { "description": "Cancelled before delivery", "badge": "b-red" }
+      },
+      "transitions": [
+        {
+          "from": "PREPARING", "to": "DISPATCHED",
+          "trigger": "tracking_no is set (on create with tracking OR on update adding tracking)",
+          "auto": true,
+          "guard": "tracking_no must be non-empty string, digits only",
+          "db_update": "SET status='DISPATCHED', dispatched_at=NOW(), tracking_no=:trackingNo",
+          "event": "SHIPMENT_DISPATCHED"
+        },
+        {
+          "from": "PREPARING", "to": "CANCELLED",
+          "trigger": "Manual cancel",
+          "guard": "cancel_reason required (>=5 chars)",
+          "db_update": "SET status='CANCELLED', cancelled_at=NOW(), cancel_reason=:reason",
+          "event": "STATUS_CHANGED(PREPARING->CANCELLED)"
+        },
+        {
+          "from": "DISPATCHED", "to": "DELIVERED",
+          "trigger": "Carrier API polling OR manual mark",
+          "guard": "none",
+          "db_update": "SET status='DELIVERED', delivered_at=NOW()",
+          "event": "SHIPMENT_DELIVERED"
+        },
+        {
+          "from": "DISPATCHED", "to": "CANCELLED",
+          "trigger": "Manual cancel (rare, package recalled from carrier)",
+          "guard": "cancel_reason required",
+          "db_update": "SET status='CANCELLED', cancelled_at=NOW(), cancel_reason=:reason",
+          "event": "STATUS_CHANGED(DISPATCHED->CANCELLED)"
+        }
+      ],
+      "invalid_transitions": [
+        "DELIVERED -> any (terminal state)",
+        "CANCELLED -> any (terminal state)",
+        "PREPARING -> DELIVERED (must go through DISPATCHED)",
+        "DISPATCHED -> PREPARING (no backward)"
+      ]
+    },
+
+    "recall_state_machine": {
+      "states": {
+        "REQUESTED":  { "description": "Created, no driver assigned", "badge": "b-red" },
+        "ASSIGNED":   { "description": "Driver assigned, SMS sent", "badge": "b-blue" },
+        "COMPLETED":  { "description": "Driver confirmed pickup", "badge": "b-green" },
+        "CANCELLED":  { "description": "Cancelled", "badge": "b-slate" }
+      },
+      "transitions": [
+        {
+          "from": "REQUESTED", "to": "ASSIGNED",
+          "trigger": "driver_id set (on create with driver OR on update adding driver)",
+          "guard": "driver_id must be valid, driver.available=true, driver.current < driver.max_capacity",
+          "db_update": "SET status='ASSIGNED', driver_id=:driverId",
+          "event": "PICKUP_SCHEDULED",
+          "side_effect": "Send SMS to driver via MailLog"
+        },
+        {
+          "from": "ASSIGNED", "to": "COMPLETED",
+          "trigger": "Manual completion confirmation",
+          "guard": "condition_note required, grade required (A/B/C)",
+          "db_update": "SET status='COMPLETED', completed_at=NOW(), condition_note=:note, grade=:grade",
+          "event": "PICKUP_COMPLETED"
+        },
+        {
+          "from": "ASSIGNED", "to": "REQUESTED",
+          "trigger": "Driver reassignment (unlink current driver)",
+          "guard": "reason required (stored in recall note append)",
+          "db_update": "SET status='REQUESTED', driver_id=NULL",
+          "event": "STATUS_CHANGED(ASSIGNED->REQUESTED)"
+        },
+        {
+          "from": "REQUESTED", "to": "CANCELLED",
+          "trigger": "Manual cancel",
+          "guard": "cancel_reason required",
+          "db_update": "SET status='CANCELLED', cancel_reason=:reason"
+        },
+        {
+          "from": "ASSIGNED", "to": "CANCELLED",
+          "trigger": "Manual cancel",
+          "guard": "cancel_reason required",
+          "db_update": "SET status='CANCELLED', cancel_reason=:reason"
+        }
+      ],
+      "overdue_detection": {
+        "query": "SELECT * FROM as_recalls WHERE status IN ('REQUESTED','ASSIGNED') AND pickup_date < CURDATE()",
+        "schedule": "Spring @Scheduled cron: 0 0 9 * * MON-FRI (daily 09:00 weekdays)",
+        "action": "Notify TEAM_LEAD via system notification"
+      }
+    },
+
+    "api_endpoints": [
+      {
+        "endpoint": "POST /api/shipments",
+        "description": "Create outbound shipment for a ticket",
+        "auth": "AS_ENGINEER, ADMIN",
+        "request_body": {
+          "ticketId": 2641,
+          "recipientName": "김민수",
+          "recipientPhone": "010-1234-5678",
+          "address": "서울 강남구 테헤란로 123 401호",
+          "shipmentType": "REPAIRED",
+          "carrier": "CJ대한통운",
+          "trackingNo": "6012345678901",
+          "cxHandover": true,
+          "note": "좌측 드라이버 교체 완료품"
+        },
+        "validation": {
+          "ticketId": "Required, must exist, status must be IN_PROGRESS or later (steps 3+)",
+          "recipientName": "Required, 2..100 chars",
+          "recipientPhone": "Required, regex /^01[016789]\\d{7,8}$/",
+          "address": "Required, 10..500 chars",
+          "shipmentType": "Required, one of REPAIRED/EXCHANGE_NEW/REFURBISHED",
+          "carrier": "Required, one of: CJ대한통운, 한진택배, 로젠택배, 우체국, 기타",
+          "trackingNo": "Optional, if provided: digits only, 10..20 chars -> auto-transition to DISPATCHED",
+          "cxHandover": "Optional boolean, default false. If true -> set cx_handover=PENDING",
+          "note": "Optional, maxLength 500"
+        },
+        "response_201": {
+          "shipmentId": 301,
+          "ticketId": 2641,
+          "ticketNo": "AS-2641",
+          "status": "DISPATCHED",
+          "cxHandover": "PENDING",
+          "carrier": "CJ대한통운",
+          "trackingNo": "6012345678901",
+          "trackingUrl": "https://trace.cjlogistics.com/web/detail.jsp?slipno=6012345678901",
+          "createdAt": "2026-04-29T14:00:00.000Z",
+          "dispatchedAt": "2026-04-29T14:00:00.000Z"
+        },
+        "side_effects": [
+          "INSERT as_ticket_events (SHIPMENT_CREATED)",
+          "If trackingNo present: INSERT as_ticket_events (SHIPMENT_DISPATCHED)",
+          "If cxHandover=true: Send notification to CS/CX team",
+          "UPDATE as_tickets SET status='SHIPPING' (if currently IN_PROGRESS or COST_ENTERED)"
+        ]
+      },
+      {
+        "endpoint": "PATCH /api/shipments/{id}",
+        "description": "Update shipment (add tracking, confirm CX handover, cancel)",
+        "auth": "AS_ENGINEER (update), CS_CX (cxHandover confirm only), ADMIN (all)",
+        "request_body_add_tracking": {
+          "trackingNo": "6012345678901"
+        },
+        "request_body_cx_confirm": {
+          "cxHandover": "CONFIRMED"
+        },
+        "request_body_cancel": {
+          "status": "CANCELLED",
+          "cancelReason": "고객 요청으로 출고 취소"
+        },
+        "request_body_deliver": {
+          "status": "DELIVERED"
+        },
+        "validation_tracking": {
+          "current_status": "Must be PREPARING",
+          "trackingNo": "digits only, 10..20 chars"
+        },
+        "validation_cx": {
+          "who": "CS_CX role or higher",
+          "current_cx_status": "Must be PENDING"
+        },
+        "validation_cancel": {
+          "current_status": "Must be PREPARING or DISPATCHED",
+          "cancelReason": "Required, minLength 5"
+        },
+        "validation_deliver": {
+          "current_status": "Must be DISPATCHED"
+        },
+        "response_200": "Updated Shipment object",
+        "response_409_examples": [
+          { "code": "INVALID_TRANSITION", "message": "Cannot cancel a DELIVERED shipment" },
+          { "code": "INVALID_TRANSITION", "message": "Cannot add tracking to a DISPATCHED shipment (already has tracking)" }
+        ]
+      },
+      {
+        "endpoint": "GET /api/shipments",
+        "description": "Paginated list of all shipments with filters",
+        "auth": "ALL (filtered by role visibility)",
+        "query_params": {
+          "from": "ISO date", "to": "ISO date",
+          "status": "PREPARING | DISPATCHED | DELIVERED | CANCELLED",
+          "carrier": "carrier name",
+          "cxHandover": "NOT_REQUIRED | PENDING | CONFIRMED",
+          "keyword": "ticketNo or recipientName or trackingNo",
+          "page": "0", "size": "20", "sort": "createdAt,desc"
+        },
+        "response_200": "PageResponse<Shipment>"
+      },
+      {
+        "endpoint": "GET /api/shipments/{id}/tracking",
+        "description": "Get tracking URL and latest status from carrier",
+        "auth": "ALL",
+        "response_200": {
+          "carrier": "CJ대한통운",
+          "trackingNo": "6012345678901",
+          "trackingUrl": "https://trace.cjlogistics.com/web/detail.jsp?slipno=6012345678901",
+          "lastStatus": "배달완료",
+          "lastUpdated": "2026-04-30T14:22:00.000Z"
+        },
+        "carrier_url_patterns": {
+          "CJ대한통운": "https://trace.cjlogistics.com/web/detail.jsp?slipno={trackingNo}",
+          "한진택배": "https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?wblnb={trackingNo}",
+          "로젠택배": "https://www.ilogen.com/web/personal/trace/{trackingNo}",
+          "우체국": "https://service.epost.go.kr/trace.RetrieveDomRi498TraceList.comm?sid1={trackingNo}"
+        }
+      },
+      {
+        "endpoint": "POST /api/recalls",
+        "description": "Create recall (pickup request) for a ticket",
+        "auth": "AS_ENGINEER, TEAM_LEAD, ADMIN",
+        "request_body": {
+          "ticketId": 2645,
+          "customerName": "이수진",
+          "customerPhone": "010-3344-5566",
+          "address": "서울 서초구 서초대로 456",
+          "productModel": "WE-300",
+          "recallMethod": "DRIVER_DIRECT",
+          "driverId": 3,
+          "pickupDate": "2026-04-29",
+          "note": "구매 5일차 - 단기 접수"
+        },
+        "validation": {
+          "ticketId": "Required, must exist",
+          "recallMethod": "Required, DRIVER_DIRECT or COURIER",
+          "driverId": "Required when recallMethod=DRIVER_DIRECT. Must exist, available=true, current < maxCapacity",
+          "pickupDate": "Required, must be >= today",
+          "address": "Required, 10..500 chars"
+        },
+        "response_201": "Recall object with status=ASSIGNED (if driverId given) or REQUESTED",
+        "side_effects": [
+          "INSERT as_ticket_events (PICKUP_SCHEDULED, payload={driverId, scheduledDate})",
+          "If driverId given: Send SMS to driver with pickup details (POST /api/mail-logs/sms), INSERT MailLog"
+        ]
+      },
+      {
+        "endpoint": "PATCH /api/recalls/{id}",
+        "description": "Update recall (assign driver, complete, reassign, cancel)",
+        "auth": "AS_ENGINEER, TEAM_LEAD, ADMIN",
+        "request_body_complete": {
+          "status": "COMPLETED",
+          "conditionNote": "외관 양호, 미사용 제품",
+          "grade": "A"
+        },
+        "request_body_reassign": {
+          "driverId": 5,
+          "pickupDate": "2026-04-30",
+          "reassignReason": "기존 기사 일정 변경"
+        },
+        "request_body_cancel": {
+          "status": "CANCELLED",
+          "cancelReason": "고객 취소 요청"
+        },
+        "validation_complete": {
+          "current_status": "Must be ASSIGNED",
+          "conditionNote": "Required, minLength 2",
+          "grade": "Required, one of A/B/C"
+        },
+        "validation_reassign": {
+          "current_status": "Must be ASSIGNED",
+          "new_driverId": "Must differ from current, valid driver",
+          "reassignReason": "Required, minLength 5"
+        },
+        "response_200": "Updated Recall object",
+        "side_effects_complete": [
+          "INSERT as_ticket_events (PICKUP_COMPLETED, payload={condition, grade})"
+        ]
+      },
+      {
+        "endpoint": "GET /api/recalls/pending",
+        "description": "All recalls with status REQUESTED or ASSIGNED (for overdue dashboard)",
+        "auth": "TEAM_LEAD, ADMIN",
+        "response_200": {
+          "pending": [
+            {
+              "recallId": 415,
+              "ticketNo": "AS-2645",
+              "customerName": "이수진",
+              "productModel": "WE-300",
+              "status": "REQUESTED",
+              "pickupDate": "2026-04-26",
+              "daysOverdue": 2,
+              "driverName": null
+            }
+          ],
+          "summary": {
+            "totalPending": 14,
+            "overdue": 5,
+            "todayAssigned": 3,
+            "todayCompleted": 7,
+            "avgPickupDays": 2.4
+          }
+        }
+      },
+      {
+        "endpoint": "GET /api/drivers",
+        "description": "List all drivers with current workload",
+        "auth": "AS_ENGINEER, TEAM_LEAD, ADMIN",
+        "query_params": { "available": "true/false (filter)" },
+        "response_200": [
+          {
+            "driverId": 1,
+            "name": "홍기사",
+            "phone": "010-1111-0001",
+            "region": "서울 강남/서초",
+            "maxCapacity": 10,
+            "currentAssignments": 8,
+            "todayCompleted": 2,
+            "available": true,
+            "loadLevel": "high"
+          }
+        ],
+        "loadLevel_rules": { "low": "<=30%", "medium": "31-70%", "high": ">70%" }
+      }
+    ]
+  }
+}
