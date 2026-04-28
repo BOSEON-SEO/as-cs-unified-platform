@@ -8,6 +8,7 @@ export type UserRole = 'AS_ENGINEER' | 'CS_CX' | 'TEAM_LEAD' | 'ADMIN';
  */
 export interface NavItem {
   pageId: string;
+  path: string;
   label: string;
   icon: string;
   badge?: string | number | null;

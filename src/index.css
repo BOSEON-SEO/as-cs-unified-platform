@@ -31,7 +31,7 @@
 
   /* Layout dimensions */
   --titlebar-height: 32px;
-  --topbar-height: 56px;
+  --header-height: 56px;
   --sidebar-width: 240px;
   --statusbar-height: 22px;
 }
@@ -41,6 +41,8 @@ body {
   font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-size: 13px;
+  color: var(--color-text-primary);
 }
 
 /* ===== Electron titlebar drag ===== */
@@ -58,4 +60,122 @@ body {
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* ===========================================================
+   RESPONSIVE GRID LAYOUT
+   Mobile-first: single column
+   Desktop (>520px): 4-row x 2-col grid
+   =========================================================== */
+
+/* ── Mobile (default, <=520px) ── */
+.app-shell {
+  display: grid;
+  grid-template-rows: var(--titlebar-height) var(--header-height) 1fr var(--statusbar-height);
+  grid-template-columns: 1fr;
+}
+
+/* Mobile: sidebar 보이기/숨기기는 Sidebar 컴포넌트에서 처리 (fixed overlay) */
+/* Mobile: 모바일 전용 유틸리티 */
+.mobile-only {
+  display: block;
+}
+
+/* ── Desktop (>520px) ── */
+@media (min-width: 521px) {
+  .app-shell {
+    grid-template-rows: var(--titlebar-height) var(--header-height) 1fr var(--statusbar-height);
+    grid-template-columns: var(--sidebar-width) 1fr;
+  }
+
+  /* Titlebar: row 1, col 1-2 */
+  .app-titlebar {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  /* Sidebar: row 2-3, col 1 */
+  .sidebar-panel {
+    grid-column: 1;
+    grid-row: 2 / 4;
+  }
+
+  /* Header: row 2, col 2 */
+  .header-bar {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  /* Main: row 3, col 2 */
+  .main-content {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  /* Statusbar: row 4, col 1-2 */
+  /* handled by col-span-full in component */
+
+  .mobile-only {
+    display: none !important;
+  }
+}
+
+/* ── Tailwind v4: @custom-variant for desktop breakpoint ── */
+@custom-variant desktop {
+  @media (min-width: 521px) {
+    @slot;
+  }
+}
+
+/* ===========================================================
+   PAGE UTILITIES (used by placeholder pages)
+   =========================================================== */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0F172A;
+  letter-spacing: -0.01em;
+}
+
+.page-desc {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-top: 4px;
+}
+
+.placeholder-card {
+  display: flex;
+  height: 240px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 2px dashed var(--color-border);
+  background: var(--color-card-bg);
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+/* ===== Page transition ===== */
+.main-content > * {
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
