@@ -1,0 +1,521 @@
+{
+  "meta": {
+    "source": "prototype-v2.html",
+    "title": "A/S & CS 통합 플랫폼 - Prototype v2",
+    "version": "v0.2.0-prototype",
+    "analyzedAt": "2026-04-28"
+  },
+
+  "pages": [
+    {
+      "index": 1,
+      "pageId": "1",
+      "title": "고객 정보 조회",
+      "icon": "👤",
+      "headerTitle": "👤 고객 정보 조회",
+      "description": "전화번호 기반 통합 고객 뷰 · 5개 탭으로 모든 이력 통합",
+      "features": [
+        "전화번호/고객명/상태 검색 폼",
+        "고객 프로필 카드 (VIP 뱃지, 정품등록, 총 구매금액, A/S 건수 등)",
+        "5개 탭: 구매이력, A/S이력, 상담이력, 정품등록, 메모",
+        "구매이력 테이블 (주문번호, 주문일, 제품, 모델, 금액, 배송, A/S, 액션)",
+        "신규 고객 등록 버튼",
+        "내보내기 버튼"
+      ]
+    },
+    {
+      "index": 2,
+      "pageId": "2",
+      "title": "전체 상담 내역",
+      "icon": "💬",
+      "headerTitle": "💬 전체 상담 내역",
+      "description": "채널 통합 · crm_call_memo 402K건 + tbnws_send_sms_result 2.6M건",
+      "features": [
+        "KPI 5종: 금일 상담, 전화, 카카오, 이메일/SMS, A/S 연결",
+        "다중 필터: 전화번호/키워드, 채널, 기간, 담당자",
+        "상담 목록 테이블 (일시, 채널, 고객, 요약, 담당, A/S)",
+        "상담 상세 사이드 패널 (고객, 통화시간, 내용, 관련 티켓)",
+        "액션 버튼: A/S 접수, 이메일, SMS, 고객 페이지 이동",
+        "페이지네이션 (402,578건)"
+      ]
+    },
+    {
+      "index": 3,
+      "pageId": "3",
+      "title": "젠데스크 조회",
+      "icon": "🔗",
+      "headerTitle": "🔗 젠데스크 조회",
+      "description": "티켓 번호로 Zendesk API 직접 조회 · 신규 티켓 등록 시에는 사용 안 함 (마이그레이션 완료)",
+      "features": [
+        "티켓 번호/URL 검색",
+        "인증/권한 설정 패널 (서브도메인, Bearer Token, OAuth 2.0, Basic Auth)",
+        "최근 조회 이력 캐시 (24시간 TTL)",
+        "Zendesk 티켓 상세 뷰 (우선도, 담당, 댓글 수, 최근 업데이트)",
+        "대화 이력 타임라인",
+        "A/S 티켓 연결 버튼"
+      ]
+    },
+    {
+      "index": 4,
+      "pageId": "tickets",
+      "title": "A/S 티켓 목록",
+      "icon": "📋",
+      "headerTitle": "📋 A/S 티켓 목록",
+      "description": "내 담당 / 팀원 / 전체 토글 · 상태 · 우선도 · 기간 다중 필터",
+      "features": [
+        "조회 범위 토글: 내 담당(12) / 우리 팀(82) / 전체(247)",
+        "다중 필터: 기간, 상태, 우선도, 유형, 키워드",
+        "KPI 5종: 전체 진행중, 내 담당, SLA 임박, SLA 초과, 금주 완료",
+        "티켓 목록 테이블 (체크박스, A/S#, 고객, 제품, 유형, 담당, 상태, 경과, SLA, 마지막 액션)",
+        "일괄 액션: 담당 변경, 일괄 메시지, 상태 변경",
+        "페이지네이션 (247건)",
+        "신규 A/S 접수 버튼, Excel 내보내기"
+      ]
+    },
+    {
+      "index": 5,
+      "pageId": "4",
+      "title": "A/S 상세 (단계별)",
+      "icon": "🛠",
+      "headerTitle": "🛠 A/S 상세 — AS-XXXX",
+      "description": "A/S 접수부터 종료까지 6단계 스텝퍼 + 타임라인 + AI 서포트",
+      "steps": [
+        "1. 접수",
+        "2. 배정",
+        "3. 진단 / 처리 결정",
+        "4. 비용 입력 (지출/수납/보상 3축)",
+        "5. 출고 / 회수 (송장 + CX 인계)",
+        "6. 종료 (완료 알림 · 평가)"
+      ],
+      "features": [
+        "KPI 5종: 경과, SLA 사용, 담당, 순비용, 소통",
+        "6단계 스텝퍼 시각화 (done/active/pending 상태)",
+        "통합 타임라인 (TICKET_CREATED, ENGINEER_ASSIGNED, WORK_STARTED, EMAIL_SENT, COST_ADDED, PHONE_CALL_LOGGED)",
+        "5개 탭: 통합 타임라인, 비용 내역, 출고 내역, 회수 내역, 첨부",
+        "우측 패널: 고객 정보, 제품 정보, 증상/분류, 처리 메모",
+        "AI 의사결정 서포트 패널 (유사 케이스, 추천 처리, 답변 초안)",
+        "액션 버튼: 상태 변경, 이메일, SMS, 비용 추가, 출고 등록, 회수 요청"
+      ]
+    },
+    {
+      "index": 6,
+      "pageId": "5",
+      "title": "A/S 현황 대시보드",
+      "icon": "📊",
+      "headerTitle": "📊 A/S 현황 대시보드",
+      "description": "실시간 운영 현황판 · 30초마다 자동 갱신",
+      "features": [
+        "KPI 6종: 접수 대기, 진행중, 출고 대기, 금일 완료, SLA 초과, 평균 해결",
+        "처리유형 분포 도넛차트 (수리/교환/반품/기타)",
+        "담당자별 진행 스택바 차트",
+        "주간 트렌드 라인차트 (접수 vs 완료)",
+        "정체 티켓 Top 5 테이블",
+        "필터: 기간, 담당자, 브랜드"
+      ]
+    },
+    {
+      "index": 7,
+      "pageId": "6",
+      "title": "A/S 비용 추적",
+      "icon": "💰",
+      "headerTitle": "💰 A/S 비용 추적",
+      "description": "3축 비용 (지출 / 수납 / 본사 보상) · 미승인 건 대기",
+      "features": [
+        "KPI 4종: 우리 지출, 고객 수납, 본사 보상, 순비용",
+        "월별 집계 테이블 (월, 지출, 수납, 보상, 순비용)",
+        "티켓별 비용 테이블 (A/S#, 고객, 지출, 수납, 보상, 순, 상태)",
+        "비용 입력 사이드 패널 (비용 축 선택, 항목, 금액, 비고, 증빙 파일)",
+        "승인/반려 워크플로우",
+        "필터: 기간, 유형, 담당자, 승인 상태"
+      ]
+    },
+    {
+      "index": 8,
+      "pageId": "7",
+      "title": "A/S 출고 관리",
+      "icon": "📦",
+      "headerTitle": "📦 A/S 출고 관리",
+      "description": "출고 대기 -> 송장 등록 -> CX 인계 흐름",
+      "features": [
+        "4개 탭: 출고 대기(12), 배송 중(38), CX 인계 대기(3), 완료(847)",
+        "필터: A/S#/송장번호/수신인, 택배사, 유형",
+        "출고 목록 테이블 (체크박스, A/S#, 고객, 제품, 유형, 택배, 송장, 상태, CX)",
+        "출고 등록 사이드 패널 (수신인, 배송 주소, 출고 유형, 택배사, 송장번호)",
+        "CX 인계 후 종료 알림 발송 옵션",
+        "흐름 시각화: 수리/교환 완료 -> 수신인 -> 택배사 -> 송장 -> CX 인계",
+        "일괄 송장 업로드"
+      ]
+    },
+    {
+      "index": 9,
+      "pageId": "8",
+      "title": "회수 관리",
+      "icon": "🚚",
+      "headerTitle": "🚚 회수 관리",
+      "description": "단기 접수 직접 기사 배정 + 장기는 일반 택배 회수",
+      "features": [
+        "KPI 4종: 미회수, 금일 배정, 금일 완료, 평균 회수일",
+        "4개 탭: 회수 대기(8), 기사 배정(5), 미회수(14), 완료(1,204)",
+        "회수 목록 테이블 (회수#, A/S#, 고객, 제품, 접수, 경과, 방식, 기사, 상태)",
+        "기사별 부하 바차트 (홍기사, 정기사, 윤기사, 최기사)",
+        "회수 요청 사이드 패널 (고객, 제품, 회수 방식, 기사 추천, 희망 수거일, 비고)",
+        "회수 방식: 기사 직접 / 일반 택배"
+      ]
+    },
+    {
+      "index": 10,
+      "pageId": "9",
+      "title": "정품등록 · 시리얼",
+      "icon": "🏷",
+      "headerTitle": "🏷 정품등록 · 시리얼 · 쿠폰",
+      "description": "시리얼 검증 · 보증 만료 추적 · 위변조 블랙리스트",
+      "features": [
+        "시리얼 빠른 검증 (정상/중복/위변조 판별)",
+        "4개 탭: 정품등록(12,840), 시리얼 관리, 쿠폰 발급 이력, 블랙리스트(24)",
+        "필터: 시리얼/모델/전화번호, 상태, 모델",
+        "정품등록 테이블 (시리얼, 모델, 고객, 등록, 보증만료, 상태, 쿠폰)",
+        "등록 상세 패널 (시리얼, 고객, 제품/구매일, 보증 기간, 발급 쿠폰)",
+        "액션: 쿠폰 재발급, 보증 연장, 블랙리스트",
+        "위변조 탐지: 동일 시리얼 2회 등록 시 자동 알림"
+      ]
+    },
+    {
+      "index": 11,
+      "pageId": "10",
+      "title": "교환 · 반품",
+      "icon": "🔄",
+      "headerTitle": "🔄 교환 · 반품 관리",
+      "description": "검수 -> A/B/C 분기 -> 출고 자동 생성 / 환불 트리거",
+      "features": [
+        "4개 탭: 전체(30), 교환(18), 반품(7), 검수 대기(5)",
+        "교환/반품 테이블 (접수#, 고객, 제품, 유형, 검수, 처리분기, 상태, 액션)",
+        "검수 결과 사이드 패널 (검수 등급 A/B/C, 처리 분기, 검수 메모, 검수 사진)",
+        "흐름: 회수 도착 -> 검수(A/B/C) -> A:재고 / B:리퍼브 / C:폐기 -> 출고/환불 자동",
+        "A급: 재고 재등록 + 교환 출고 자동 생성",
+        "B급: 리퍼브 큐",
+        "C급: 폐기 큐"
+      ]
+    },
+    {
+      "index": 12,
+      "pageId": "11",
+      "title": "이메일 · SMS 로그",
+      "icon": "📧",
+      "headerTitle": "📧 이메일 · SMS 로그",
+      "description": "MailLog 통합 · 채널 탭 + 실패 큐 + 재발송",
+      "features": [
+        "KPI 4종: 전체 발송(2,648,926), 성공률(98.2%), 실패(8), 대기(3)",
+        "5개 탭: 전체, 이메일, SMS, 알림톡, 실패만(8)",
+        "필터: 수신자/A/S#/키워드, 상태, 기간",
+        "발송 로그 테이블 (일시, 채널, 수신자, 제목, A/S, 발송자, 상태)",
+        "재발송 사이드 패널 (원본 발송 정보, 실패 사유, 수신자 수정, 채널 변경)",
+        "실패 건 일괄 재발송 버튼",
+        "새 MailLog 생성 옵션 (재발송 이력)"
+      ]
+    },
+    {
+      "index": 13,
+      "pageId": "12",
+      "title": "티켓 배분",
+      "icon": "👥",
+      "headerTitle": "👥 티켓 배분 · 담당자 관리",
+      "description": "팀장 전용 · 자동 배정 토글 ON 시 인입 즉시 자동 분배",
+      "features": [
+        "자동 배정 토글 (ON/OFF) + KPI (금일 자동 배정, 평균 배정 시간, 규칙 위반, 미배정 잔여)",
+        "미배정 큐 (드래그 카드 방식)",
+        "담당자별 현황 테이블 (담당, 부하, 금주, 평균, SLA, 응답, 액션)",
+        "자동 배정 풀 (크루 ON/OFF 토글)",
+        "배정 모드: 라운드 로빈(부하 균형), 최소 부하 우선, 제품군 매칭",
+        "담당자별 최대 보유 설정",
+        "제외 조건: SLA 초과 2건+ 스킵, 동일 고객 직전 담당자 우선"
+      ]
+    },
+    {
+      "index": 14,
+      "pageId": "13",
+      "title": "리포트",
+      "icon": "📑",
+      "headerTitle": "📑 리포트",
+      "description": "생성 주기 · 단위 · 형식이 아직 미확정. 실무진 컨펌 후 구현 예정.",
+      "status": "설계 중",
+      "features": [
+        "옵션 A: 월간 일괄 (매월 1일 자동 생성, Excel+PDF)",
+        "옵션 B: 건별 즉시 (티켓 종료 시 자동 생성, 본사 보상 즉시 청구)",
+        "옵션 C: 하이브리드 (건별 보상 + 월간 운영 현황)",
+        "결정 항목: 본사 보상 청구 주기, 리포트 생성 주체, PDF 양식, 저장 기간, 접근 권한"
+      ]
+    },
+    {
+      "index": 15,
+      "pageId": "14",
+      "title": "전체 통계",
+      "icon": "📈",
+      "headerTitle": "📈 전체 통계 대시보드",
+      "description": "총괄 전용 · KPI 4종 + 차트 4종 + 액션 큐 · Live 30초 자동 갱신",
+      "features": [
+        "KPI 4종: 월 접수량, 평균 해결(P50), SLA 준수율, 월 순비용",
+        "6개월 트렌드 라인차트 (접수 vs 완료)",
+        "제품별 A/S 빈도 Top 5 바차트",
+        "증상 유형 분포 도넛차트 (음향/충전/외관/페어링/기타)",
+        "액션 필요 큐 (좀비 티켓, 응대 누락, 가짜 완료, 시각 오류, 미배정, 비용 불일치, 첨부 누락, 메모 미작성)",
+        "필터: 월, 브랜드"
+      ]
+    },
+    {
+      "index": 16,
+      "pageId": "15",
+      "title": "설정",
+      "icon": "⚙",
+      "headerTitle": "⚙ 설정",
+      "description": "총괄 전용 · 사용자 / 시스템 / LLM 위키 / 기본값",
+      "features": [
+        "4개 탭: 사용자, 시스템/SLA, LLM 위키, 기본값(코드/항목)",
+        "사용자 관리 (12명, 추가/편집/비활성/복구)",
+        "역할: A/S 담당자, CS/CX, 팀장, 총괄",
+        "SLA 단계별 기한 설정 (접수->배정 4h, 배정->작업 1일, 최초응답 24h, 전체 해결 5일)",
+        "알림 규칙 (SLA 경과, 에스컬레이션, 리마인더, 자동 배정, 좀비 티켓, 신규 접수)",
+        "사용자 추가 패널 (이름, 이메일, 역할, 초기 비밀번호 자동 생성)",
+        "시스템 상태 (LLM, SMTP, SMS/알림톡, 택배API, VPN, MySQL)"
+      ]
+    },
+    {
+      "index": 17,
+      "pageId": "ai",
+      "title": "AI 의사결정 서포트",
+      "icon": "🤖",
+      "headerTitle": "🤖 AI 의사결정 서포트",
+      "description": "로컬 Claude API (Tailscale VPN) · 제품 증상 분석 · 답변 초안 · 유사 케이스 검색 -- 모두 suggestion 형태, 자동 발송 절대 금지",
+      "isNew": true,
+      "features": [
+        "KPI 4종: 금일 호출, 담당자 채택률, 평균 응답, 학습 케이스",
+        "제품 증상 분석 (모델 + 증상 입력 -> 추정 원인 순위)",
+        "답변 초안 작성 (채널/어조 선택 -> 초안 생성, 편집 후 발송 검토)",
+        "유사 케이스 검색 (의미 기반 검색, 유사도 %)",
+        "고객 컨텍스트 요약 (전화번호 -> 통합 이력 1문단 요약)",
+        "AI 호출 이력 테이블 (시각, 유형, 대상, 호출자, 결과 채택)",
+        "사용 정책 (suggestion만, PII 마스킹, 로컬 API, 이력 전수 기록)",
+        "효과 측정 (답변 작성 시간, 최초 응답, 처리 분기 일치율, 만족도)"
+      ]
+    }
+  ],
+
+  "sidebar": {
+    "brand": {
+      "logo": "A",
+      "title": "A/S & CS",
+      "subtitle": "통합 관리 플랫폼"
+    },
+    "groups": [
+      {
+        "groupTitle": "고객 & 상담",
+        "items": [
+          { "pageId": "1",       "label": "고객 정보 조회",    "icon": "👤", "badge": null },
+          { "pageId": "2",       "label": "전체 상담 내역",    "icon": "💬", "badge": "42" },
+          { "pageId": "3",       "label": "젠데스크 조회",     "icon": "🔗", "badge": null }
+        ]
+      },
+      {
+        "groupTitle": "A/S 운영",
+        "items": [
+          { "pageId": "tickets", "label": "A/S 티켓 목록",    "icon": "📋", "badge": "82" },
+          { "pageId": "4",       "label": "A/S 상세 (단계별)", "icon": "🛠",  "badge": null, "hasDot": true },
+          { "pageId": "5",       "label": "A/S 현황 대시보드", "icon": "📊", "badge": null, "hasDot": true },
+          { "pageId": "6",       "label": "A/S 비용 추적",    "icon": "💰", "badge": null },
+          { "pageId": "7",       "label": "A/S 출고 관리",    "icon": "📦", "badge": "12" },
+          { "pageId": "8",       "label": "회수 관리",         "icon": "🚚", "badge": "14" }
+        ]
+      },
+      {
+        "groupTitle": "제품 & 처리",
+        "items": [
+          { "pageId": "9",       "label": "정품등록 · 시리얼", "icon": "🏷", "badge": null },
+          { "pageId": "10",      "label": "교환 · 반품",       "icon": "🔄", "badge": null }
+        ]
+      },
+      {
+        "groupTitle": "커뮤니케이션",
+        "items": [
+          { "pageId": "11",      "label": "이메일 · SMS 로그", "icon": "📧", "badge": null }
+        ]
+      },
+      {
+        "groupTitle": "AI 어시스턴트",
+        "items": [
+          { "pageId": "ai",      "label": "AI 의사결정 서포트", "icon": "🤖", "badge": "NEW", "badgeStyle": "gradient" }
+        ]
+      },
+      {
+        "groupTitle": "관리",
+        "items": [
+          { "pageId": "12",      "label": "티켓 배분",         "icon": "👥", "badge": "5" },
+          { "pageId": "13",      "label": "리포트",            "icon": "📑", "badge": "설계 중", "badgeStyle": "muted" },
+          { "pageId": "14",      "label": "전체 통계",         "icon": "📈", "badge": null },
+          { "pageId": "15",      "label": "설정",              "icon": "⚙",  "badge": null }
+        ]
+      }
+    ],
+    "footer": {
+      "statusIndicators": [
+        { "label": "Spring API",          "status": "connected" },
+        { "label": "AI 서포트 (Claude)",  "status": "connected" },
+        { "label": "자동 배정",           "status": "ON" }
+      ],
+      "versionInfo": "v0.2.0"
+    }
+  },
+
+  "layout": {
+    "gridTemplate": {
+      "rows": "32px 56px 1fr 22px",
+      "columns": "240px 1fr",
+      "description": "4행 2열 CSS Grid (titlebar, topbar+sidebar, main, statusbar)"
+    },
+    "regions": {
+      "titlebar": {
+        "gridArea": "row 1 / col 1-2 (전체 너비)",
+        "height": "32px",
+        "background": "linear-gradient(180deg, #1E3A8A, #1E40AF)",
+        "color": "#FFF",
+        "elements": [
+          "macOS-style traffic lights (close/minimize/maximize)",
+          "center: 앱 제목 'A/S & CS 통합 관리 플랫폼 - v0.2.0-prototype'",
+          "right: 연결 상태 + 온라인 인원"
+        ],
+        "electronFeature": "-webkit-app-region: drag (타이틀바 드래그로 창 이동)"
+      },
+      "sidebar": {
+        "gridArea": "row 2-3 / col 1 (topbar ~ main 높이)",
+        "width": "240px",
+        "background": "#0F172A (dark navy)",
+        "color": "#CBD5E1",
+        "elements": [
+          "brand: 로고 + 앱명",
+          "nav-groups: 6개 카테고리, 각 카테고리 내 nav-item",
+          "footer: 시스템 상태 인디케이터 + 버전"
+        ],
+        "scrollable": true
+      },
+      "topbar": {
+        "gridArea": "row 2 / col 2",
+        "height": "56px",
+        "background": "#FFF",
+        "borderBottom": "1px solid #E2E8F0",
+        "elements": [
+          "breadcrumb: '홈 > [현재 페이지명]'",
+          "global-search: 통합 검색 (전화번호/A/S#/고객명/시리얼, Ctrl+K)",
+          "top-actions: 새 A/S 접수(+), 알림(bell+dot), 다크모드(moon)",
+          "user: 아바타 + 이름 + 역할"
+        ]
+      },
+      "main": {
+        "gridArea": "row 3 / col 2",
+        "background": "#F8FAFC",
+        "padding": "24px 32px",
+        "scrollable": true,
+        "pageStructure": {
+          "pattern": "page-header (제목+설명+액션) -> 콘텐츠 영역",
+          "visibility": "display:none/block 토글 (한 번에 1페이지만 active)",
+          "animation": "fadeIn 0.25s (opacity+translateY)"
+        }
+      },
+      "statusbar": {
+        "gridArea": "row 4 / col 1-2 (전체 너비)",
+        "height": "22px",
+        "background": "#1E40AF",
+        "color": "#BFDBFE",
+        "fontSize": "10px",
+        "elements": [
+          "Spring API 상태",
+          "Tailscale VPN 상태",
+          "Live 갱신 카운트다운",
+          "현재 사용자/역할",
+          "날짜/시간/버전 (우측)"
+        ]
+      }
+    }
+  },
+
+  "navigation": {
+    "crumbMap": {
+      "1": "고객 정보 조회",
+      "2": "전체 상담 내역",
+      "3": "젠데스크 조회",
+      "tickets": "A/S 티켓 목록",
+      "4": "A/S 상세 (단계별)",
+      "5": "A/S 현황 대시보드",
+      "6": "A/S 비용 추적",
+      "7": "A/S 출고 관리",
+      "8": "회수 관리",
+      "9": "정품등록 · 시리얼",
+      "10": "교환 · 반품",
+      "11": "이메일 · SMS 로그",
+      "12": "티켓 배분",
+      "13": "리포트 (설계 중)",
+      "14": "전체 통계",
+      "15": "설정",
+      "ai": "AI 의사결정 서포트"
+    },
+    "keyboardShortcuts": {
+      "ArrowRight": "다음 페이지",
+      "ArrowLeft": "이전 페이지"
+    },
+    "totalPages": 17
+  },
+
+  "designTokens": {
+    "colors": {
+      "primary": "#1E40AF",
+      "primaryDark": "#1E3A8A",
+      "primaryLight": "#3B82F6",
+      "sidebarBg": "#0F172A",
+      "mainBg": "#F8FAFC",
+      "cardBg": "#FFF",
+      "border": "#E2E8F0",
+      "textPrimary": "#1E293B",
+      "textSecondary": "#64748B",
+      "textMuted": "#94A3B8",
+      "success": "#10B981",
+      "warning": "#F59E0B",
+      "danger": "#EF4444",
+      "violet": "#8B5CF6",
+      "cyan": "#06B6D4"
+    },
+    "badgeVariants": {
+      "b-blue":   { "bg": "#DBEAFE", "color": "#1E40AF" },
+      "b-green":  { "bg": "#DCFCE7", "color": "#166534" },
+      "b-amber":  { "bg": "#FEF3C7", "color": "#92400E" },
+      "b-red":    { "bg": "#FEE2E2", "color": "#991B1B" },
+      "b-slate":  { "bg": "#F1F5F9", "color": "#475569" },
+      "b-violet": { "bg": "#EDE9FE", "color": "#7C3AED" }
+    },
+    "typography": {
+      "fontFamily": "'Pretendard','Apple SD Gothic Neo','Noto Sans KR','Segoe UI',sans-serif",
+      "baseFontSize": "13px",
+      "pageTitle": "22px / weight 800",
+      "sectionTitle": "15px / weight 700",
+      "body": "12px-12.5px",
+      "small": "11px",
+      "kpiNumber": "24px / weight 800"
+    },
+    "borderRadius": {
+      "card": "10px",
+      "button": "7px",
+      "badge": "5px",
+      "input": "7px",
+      "navItem": "7px",
+      "avatar": "50%"
+    }
+  },
+
+  "uiComponents": [
+    "card", "badge", "btn (primary/secondary/danger/success/sm)",
+    "kpi (accent-blue/green/amber/red/violet/cyan)",
+    "tabs + tab", "panel (side detail)", "table",
+    "timeline (tl + tl-item + tl-dot)",
+    "donut chart", "bar-h (horizontal bar chart)", "svg line chart",
+    "step-indicator (stepper)", "flow (flow-step + flow-arrow)",
+    "drag card", "progress bar (pgbar)",
+    "note (note-amber/blue/red)", "toggle switch",
+    "global-search", "breadcrumb"
+  ]
+}
