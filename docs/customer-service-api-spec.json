@@ -1,0 +1,411 @@
+{
+  "meta": {
+    "document": "CustomerService API Specification",
+    "createdAt": "2026-04-29",
+    "basedOn": [
+      "docs/slides/01-customer-lookup.md (Phase 1 설계)",
+      "docs/customer-feature-analysis.json (Step-1 분석)",
+      "CLAUDE.md (도메인 규칙: 전화번호 기준 조회)"
+    ],
+    "backend": "Spring Boot 3.x (기존 어드민 API 확장)",
+    "db": "MySQL 8.0+ (기존 통합 DB, 스키마 추가만 허용)",
+    "auth": "JWT Bearer token (Authorization 헤더)"
+  },
+
+  "api_1_customer_lookup": {
+    "title": "(1) 전화번호로 고객정보 조회",
+
+    "endpoint": {
+      "method": "GET",
+      "path": "/api/customers",
+      "description": "전화번호를 기반으로 고객 정보 + 집계 KPI를 조회. 도메인 규칙: '모든 고객 조회는 전화번호 기준' (CLAUDE.md)"
+    },
+
+    "auth": {
+      "required": true,
+      "header": "Authorization: Bearer {accessToken}",
+      "rbac": "ALL (AS_ENGINEER, CS_CX, TEAM_LEAD, ADMIN)",
+      "note": "모든 인증된 사용자가 고객 조회 가능. 편집은 ADMIN만."
+    },
+
+    "request": {
+      "query_params": [
+        { "name": "phone", "type": "string", "required": true, "description": "전화번호 (하이픈 포함/미포함 모두 허용)", "example": "010-1234-5678 or 01012345678", "validation": "regex /^01[016789]-?\\d{3,4}-?\\d{4}$/", "note": "서버에서 하이픈 정규화 후 조회" },
+        { "name": "name", "type": "string", "required": false, "description": "고객명 (보조 필터, 부분 일치 LIKE)", "example": "김민" }
+      ]
+    },
+
+    "response_200": {
+      "description": "조회 결과. 0건=빈 배열, 1건=단일 객체 배열, 2건+=복수 객체 배열",
+      "schema": {
+        "type": "array",
+        "items": {
+          "customerId": { "type": "number", "description": "PK" },
+          "phone": { "type": "string", "description": "전화번호 (하이픈 포함)", "example": "010-1234-5678" },
+          "name": { "type": "string", "example": "김민수" },
+          "email": { "type": "string | null", "example": "minsu@email.com" },
+          "address": { "type": "string | null" },
+          "grade": { "type": "'VIP' | 'NORMAL'", "description": "구매 3회+ AND 누적 100만원+ → VIP" },
+          "registeredAt": { "type": "string (ISO8601)", "example": "2024-08-15T00:00:00Z" },
+          "totalPurchaseAmount": { "type": "number", "description": "SUM(주문.금액)", "example": 1250000 },
+          "lastPurchaseDate": { "type": "string | null", "description": "MAX(주문.주문일)" },
+          "asCount": { "type": "number", "description": "COUNT(A/S 티켓) 전체" },
+          "activeAsCount": { "type": "number", "description": "COUNT(A/S 티켓 WHERE status NOT IN CLOSED,CANCELLED)" },
+          "lastConsultationDate": { "type": "string | null", "description": "MAX(상담.일시)" },
+          "registrationCount": { "type": "number", "description": "COUNT(정품등록)" }
+        }
+      },
+      "example": [
+        {
+          "customerId": 1001,
+          "phone": "010-1234-5678",
+          "name": "김민수",
+          "email": "minsu@email.com",
+          "address": "서울 강남구 테헤란로 123 401호",
+          "grade": "VIP",
+          "registeredAt": "2024-08-15T00:00:00Z",
+          "totalPurchaseAmount": 1250000,
+          "lastPurchaseDate": "2026-03-22",
+          "asCount": 3,
+          "activeAsCount": 1,
+          "lastConsultationDate": "2026-04-20",
+          "registrationCount": 2
+        }
+      ]
+    },
+
+    "response_errors": [
+      { "status": 400, "code": "INVALID_PHONE", "message": "유효하지 않은 전화번호 형식입니다", "when": "phone 파라미터가 regex 불일치" },
+      { "status": 400, "code": "PHONE_REQUIRED", "message": "전화번호는 필수입니다", "when": "phone 파라미터 누락" },
+      { "status": 401, "code": "AUTH_REQUIRED", "message": "로그인이 필요합니다", "when": "토큰 없음" }
+    ],
+
+    "step1_comparison": {
+      "vs_slide_01": "일치. slides/01의 'GET /api/customers?phone={p}&name={n}' 동일 경로.",
+      "vs_customer_analysis": "일치. customer-feature-analysis의 endpoint 정의와 동일.",
+      "changes_from_step1": [
+        { "tag": "NEW", "item": "grade 필드 추가 (VIP/NORMAL). Step-1에서 뱃지로만 표시, 이번 명세에서 API 응답 필드로 명확화." },
+        { "tag": "NEW", "item": "activeAsCount 분리 (전체 asCount vs 진행 중 activeAsCount). Step-1에서 '3건(진행1)' 표시를 위해 2개 필드 필요." },
+        { "tag": "NEW", "item": "registrationCount 추가. Step-1 프로필 카드의 '정품등록 N건' 표시용." },
+        { "tag": "CHG", "item": "address 필드 추가. Step-1에서 출고 시 자동 채움(ShipmentCreatePanel) 용도로 필요." },
+        { "tag": "CHG", "item": "복수 결과 배열 반환. Step-1의 '동명이인 선택 모달' 지원. 기존 어드민은 첫 번째만 반환." }
+      ]
+    },
+
+    "spring_implementation_hint": {
+      "repository": "CustomerRepository.findByPhoneContaining(normalizedPhone)",
+      "aggregation": "고객 기본 정보 + 집계 KPI는 단일 쿼리로 해결 가능 (LEFT JOIN + COUNT/SUM subquery). 또는 Customer 테이블 조회 후 서비스 레이어에서 집계 API 별도 호출.",
+      "caching": "동일 전화번호 반복 조회 빈번 (CS/CX 통화 중). @Cacheable TTL 30s 권장."
+    }
+  },
+
+  "api_2_purchase_history": {
+    "title": "(2) 구매이력 조회",
+
+    "endpoint": {
+      "method": "GET",
+      "path": "/api/customers/{customerId}/orders",
+      "description": "해당 고객의 구매 주문 이력. 서버사이드 페이지네이션."
+    },
+
+    "auth": {
+      "required": true,
+      "rbac": "ALL",
+      "note": "모든 인증 사용자 조회 가능"
+    },
+
+    "request": {
+      "path_params": [
+        { "name": "customerId", "type": "number", "required": true }
+      ],
+      "query_params": [
+        { "name": "page", "type": "number", "required": false, "default": 0, "description": "0-based 페이지 인덱스" },
+        { "name": "size", "type": "number", "required": false, "default": 20, "description": "페이지 크기 (10/20/50)" },
+        { "name": "sort", "type": "string", "required": false, "default": "orderDate,desc", "description": "정렬 (Spring Data 형식)" }
+      ]
+    },
+
+    "response_200": {
+      "description": "PageResponse<PurchaseHistory>",
+      "schema": {
+        "content": {
+          "type": "array",
+          "items": {
+            "orderId": { "type": "string", "description": "주문번호", "example": "ORD-26-041" },
+            "orderDate": { "type": "string (ISO8601)", "example": "2026-03-22" },
+            "productName": { "type": "string", "example": "이어폰 Pro" },
+            "productModel": { "type": "string", "example": "WE-300" },
+            "amount": { "type": "number", "description": "주문 금액 (원)", "example": 329000 },
+            "deliveryStatus": { "type": "'PENDING' | 'SHIPPED' | 'DELIVERED'", "example": "DELIVERED" },
+            "linkedTicketNo": { "type": "string | null", "description": "연결된 A/S 티켓번호. 없으면 null.", "example": "AS-2641" },
+            "linkedTicketStatus": { "type": "string | null", "description": "연결 티켓 상태 (뱃지 표시용)", "example": "IN_PROGRESS" }
+          }
+        },
+        "totalElements": { "type": "number", "example": 5 },
+        "totalPages": { "type": "number", "example": 1 },
+        "page": { "type": "number", "example": 0 },
+        "size": { "type": "number", "example": 20 }
+      },
+      "example": {
+        "content": [
+          { "orderId": "ORD-26-041", "orderDate": "2026-03-22", "productName": "이어폰 Pro", "productModel": "WE-300", "amount": 329000, "deliveryStatus": "DELIVERED", "linkedTicketNo": "AS-2641", "linkedTicketStatus": "IN_PROGRESS" },
+          { "orderId": "ORD-25-118", "orderDate": "2025-11-05", "productName": "블루투스 스피커", "productModel": "BS-200", "amount": 189000, "deliveryStatus": "DELIVERED", "linkedTicketNo": null, "linkedTicketStatus": null }
+        ],
+        "totalElements": 5,
+        "totalPages": 1,
+        "page": 0,
+        "size": 20
+      }
+    },
+
+    "response_errors": [
+      { "status": 404, "code": "CUSTOMER_NOT_FOUND", "message": "고객을 찾을 수 없습니다", "when": "customerId 존재하지 않음" }
+    ],
+
+    "step1_comparison": {
+      "vs_slide_01": "일치. 'GET /api/customers/{id}/orders?page&size' 동일.",
+      "changes_from_step1": [
+        { "tag": "NEW", "item": "linkedTicketStatus 필드 추가. Step-1 와이어프레임에서 구매이력 테이블에 'A/S 상태' 뱃지 표시 필요." },
+        { "tag": "NEW", "item": "sort 파라미터 추가. Step-1에서 명시하지 않았으나 DataTable 정렬 기능에 필요." },
+        { "tag": "CHG", "item": "deliveryStatus enum 값 명확화. Step-1에서는 '완료' 텍스트만, 이번 명세에서 PENDING/SHIPPED/DELIVERED enum." }
+      ]
+    },
+
+    "spring_implementation_hint": {
+      "repository": "OrderRepository.findByCustomerId(customerId, Pageable)",
+      "join": "LEFT JOIN as_tickets ON order_id to get linkedTicketNo and status",
+      "note": "기존 주문 테이블 구조에 따라 JOIN 조건 다를 수 있음. Spring 팀 확인 필요."
+    }
+  },
+
+  "api_3_consultation_history": {
+    "title": "(3) 상담이력 조회",
+
+    "endpoint": {
+      "method": "GET",
+      "path": "/api/customers/{customerId}/consults",
+      "description": "해당 고객의 상담 이력 (전화/카카오/이메일/SMS 통합). 기존 crm_call_memo + tbnws_send_sms_result 통합 조회."
+    },
+
+    "auth": {
+      "required": true,
+      "rbac": "ALL",
+      "note": "모든 인증 사용자 조회 가능"
+    },
+
+    "request": {
+      "path_params": [
+        { "name": "customerId", "type": "number", "required": true }
+      ],
+      "query_params": [
+        { "name": "page", "type": "number", "required": false, "default": 0 },
+        { "name": "size", "type": "number", "required": false, "default": 20 },
+        { "name": "channel", "type": "string", "required": false, "description": "채널 필터 (PHONE/KAKAO/EMAIL/SMS). 미지정=전체" },
+        { "name": "from", "type": "string (ISO date)", "required": false, "description": "기간 시작" },
+        { "name": "to", "type": "string (ISO date)", "required": false, "description": "기간 종료" },
+        { "name": "sort", "type": "string", "required": false, "default": "occurredAt,desc" }
+      ]
+    },
+
+    "response_200": {
+      "description": "PageResponse<ConsultationLog>",
+      "schema": {
+        "content": {
+          "type": "array",
+          "items": {
+            "consultationId": { "type": "number", "description": "PK" },
+            "occurredAt": { "type": "string (ISO8601)", "description": "상담 발생 시각", "example": "2026-04-28T14:22:00Z" },
+            "channel": { "type": "'PHONE' | 'KAKAO' | 'EMAIL' | 'SMS'", "example": "PHONE" },
+            "channelLabel": { "type": "string", "description": "표시용 라벨", "example": "전화" },
+            "summary": { "type": "string", "description": "상담 요약", "example": "좌측 이어폰 무음 증상" },
+            "content": { "type": "string | null", "description": "상담 전문 (상세 패널용). 목록에서는 null, 상세 조회 시 포함", "note": "목록 성능을 위해 content는 별도 API로 분리 가능" },
+            "agentId": { "type": "number" },
+            "agentName": { "type": "string", "example": "이수진" },
+            "durationSeconds": { "type": "number | null", "description": "통화 시간 (전화만)", "example": 252 },
+            "linkedTicketNo": { "type": "string | null", "description": "연결된 A/S 티켓", "example": "AS-2641" },
+            "direction": { "type": "'INBOUND' | 'OUTBOUND' | null", "description": "통화 방향 (전화만)" }
+          }
+        },
+        "totalElements": { "type": "number" },
+        "totalPages": { "type": "number" },
+        "page": { "type": "number" },
+        "size": { "type": "number" }
+      }
+    },
+
+    "response_errors": [
+      { "status": 404, "code": "CUSTOMER_NOT_FOUND", "message": "고객을 찾을 수 없습니다" }
+    ],
+
+    "step1_comparison": {
+      "vs_slide_01": "경로 일치. 'GET /api/customers/{id}/consults?page&size'.",
+      "vs_consultation_page": "페이지 #2 '전체 상담 내역'은 별도 API 'GET /api/consultations'(고객 무관 전체 목록). 이 API는 고객별 필터된 상담만.",
+      "changes_from_step1": [
+        { "tag": "NEW", "item": "channel 필터 파라미터 추가. Step-1 와이어프레임의 '채널 탭' 지원." },
+        { "tag": "NEW", "item": "from/to 날짜 필터 추가. Step-1에 암시적이었으나 명시화." },
+        { "tag": "NEW", "item": "channelLabel 필드 추가. 프론트에서 채널 enum → 한글 변환 불필요." },
+        { "tag": "NEW", "item": "direction 필드 추가. Step-1 상담 상세 패널에 '인바운드/아웃바운드' 표시." },
+        { "tag": "NEW", "item": "content 필드 (상세용). 목록에서는 null로 전송하여 payload 최소화, 상세 패널에서 별도 호출 또는 쿼리 파라미터로 포함." },
+        { "tag": "CHG", "item": "기존 crm_call_memo + tbnws_send_sms_result 2개 테이블을 단일 API 응답으로 통합. 서버에서 UNION." }
+      ]
+    },
+
+    "spring_implementation_hint": {
+      "data_source": "2개 테이블 UNION: crm_call_memo (402K건, 전화/카카오) + tbnws_send_sms_result (2.6M건, SMS). 고객 전화번호로 필터하면 수백~수천 건 수준.",
+      "union_query": "SELECT id, occurred_at, 'PHONE' as channel, summary, agent_name FROM crm_call_memo WHERE customer_phone = ? UNION ALL SELECT id, sent_at, 'SMS', content, sender_name FROM tbnws_send_sms_result WHERE recipient_phone = ? ORDER BY occurred_at DESC LIMIT ? OFFSET ?",
+      "performance": "고객별 조회이므로 phone 인덱스만 있으면 빠름. 전체 3M건을 스캔하지 않음.",
+      "view_option": "MySQL VIEW로 통합 뷰 생성 후 JPA @Entity로 매핑 가능."
+    }
+  },
+
+  "api_4_related_tickets": {
+    "title": "(4) 관련 티켓 목록 조회",
+
+    "endpoint": {
+      "method": "GET",
+      "path": "/api/customers/{customerId}/tickets",
+      "description": "해당 고객의 A/S 티켓 목록. 서버사이드 페이지네이션."
+    },
+
+    "auth": {
+      "required": true,
+      "rbac": "ALL",
+      "note": "모든 인증 사용자 조회 가능. CS_CX는 읽기 전용."
+    },
+
+    "request": {
+      "path_params": [
+        { "name": "customerId", "type": "number", "required": true }
+      ],
+      "query_params": [
+        { "name": "page", "type": "number", "required": false, "default": 0 },
+        { "name": "size", "type": "number", "required": false, "default": 20 },
+        { "name": "status", "type": "string", "required": false, "description": "상태 필터 (RECEIVED/ASSIGNED/IN_PROGRESS/CLOSED 등)" },
+        { "name": "sort", "type": "string", "required": false, "default": "createdAt,desc" }
+      ]
+    },
+
+    "response_200": {
+      "description": "PageResponse<CustomerTicketSummary>",
+      "schema": {
+        "content": {
+          "type": "array",
+          "items": {
+            "ticketId": { "type": "number", "description": "PK" },
+            "ticketNo": { "type": "string", "description": "티켓 번호", "example": "AS-2641" },
+            "productModel": { "type": "string", "example": "WE-300" },
+            "productName": { "type": "string", "example": "이어폰 Pro" },
+            "ticketType": { "type": "'REPAIR' | 'EXCHANGE' | 'RETURN'", "example": "REPAIR" },
+            "ticketTypeLabel": { "type": "string", "example": "수리" },
+            "status": { "type": "string", "description": "TicketStatus enum", "example": "IN_PROGRESS" },
+            "statusLabel": { "type": "string", "example": "진행중" },
+            "priority": { "type": "'NORMAL' | 'URGENT' | 'VIP'", "example": "NORMAL" },
+            "assigneeName": { "type": "string | null", "example": "박수리" },
+            "symptom": { "type": "string", "description": "증상 요약 (50자 truncate)", "example": "좌측 이어폰에서 소리가 나지 않음" },
+            "createdAt": { "type": "string (ISO8601)", "example": "2026-04-28T09:12:00Z" },
+            "closedAt": { "type": "string | null" },
+            "elapsedDays": { "type": "number", "description": "접수 후 경과일", "example": 2.5 },
+            "totalExpense": { "type": "number", "description": "지출 합계", "example": 45000 },
+            "totalPayment": { "type": "number", "description": "수납 합계", "example": 30000 },
+            "totalCompensation": { "type": "number", "description": "보상 합계", "example": 20000 },
+            "netCost": { "type": "number", "description": "순비용", "example": 5000 }
+          }
+        },
+        "totalElements": { "type": "number" },
+        "totalPages": { "type": "number" },
+        "page": { "type": "number" },
+        "size": { "type": "number" }
+      }
+    },
+
+    "response_errors": [
+      { "status": 404, "code": "CUSTOMER_NOT_FOUND", "message": "고객을 찾을 수 없습니다" }
+    ],
+
+    "step1_comparison": {
+      "vs_slide_01": "경로 일치. 'GET /api/customers/{id}/tickets?page&size'.",
+      "changes_from_step1": [
+        { "tag": "NEW", "item": "ticketTypeLabel, statusLabel 필드 추가. 프론트에서 enum → 한글 변환 불필요 (서버에서 제공)." },
+        { "tag": "NEW", "item": "비용 4필드 (totalExpense/totalPayment/totalCompensation/netCost) 추가. Step-1 A/S이력 탭에 '비용합계' 컬럼 표시 위해." },
+        { "tag": "NEW", "item": "symptom 필드 추가 (50자 truncate). Step-1 테이블에 증상 요약 표시." },
+        { "tag": "NEW", "item": "status 필터 파라미터 추가. 'A/S이력 중 진행 건만' 필터 지원." },
+        { "tag": "NEW", "item": "productName 필드 추가. productModel만으로는 사용자가 제품 식별 어려움." },
+        { "tag": "CHG", "item": "elapsedDays 서버 계산. Step-1에서 클라이언트 계산 암시, 이번에 서버 계산 명시 (영업일 기준)." }
+      ]
+    },
+
+    "spring_implementation_hint": {
+      "repository": "TicketRepository.findByCustomerId(customerId, status, Pageable)",
+      "join": "LEFT JOIN as_cost_entries (GROUP BY ticket_id, SUM by axis) for cost aggregation",
+      "note": "비용 집계는 서브쿼리 또는 별도 CostService 호출. APPROVED 건만 합산."
+    }
+  },
+
+  "supplementary_apis": {
+    "title": "보조 API (Step-1에서 정의, 이번 명세에서 확인)",
+
+    "registrations": {
+      "method": "GET",
+      "path": "/api/customers/{customerId}/registrations",
+      "response": "ProductRegistration[] (배열, 페이지네이션 불필요 — 고객당 1~5건)",
+      "step1_status": "동일. 변경 없음."
+    },
+
+    "memos": {
+      "read": { "method": "GET", "path": "/api/customers/{customerId}/memos", "response": "CustomerMemo[]" },
+      "create": { "method": "POST", "path": "/api/customers/{customerId}/memos", "body": "{ content: string }", "rbac": "CS_CX, TEAM_LEAD, ADMIN" },
+      "update": { "method": "PATCH", "path": "/api/memos/{memoId}", "body": "{ content }", "guard": "24시간 이내 본인만" },
+      "delete": { "method": "DELETE", "path": "/api/memos/{memoId}", "rbac": "ADMIN only" },
+      "step1_status": "동일. 변경 없음."
+    },
+
+    "create_customer": {
+      "method": "POST",
+      "path": "/api/customers",
+      "body": "{ phone, name, email? }",
+      "rbac": "ALL",
+      "step1_status": "동일. 변경 없음."
+    },
+
+    "update_customer": {
+      "method": "PATCH",
+      "path": "/api/customers/{customerId}",
+      "body": "{ name?, email?, address? }",
+      "rbac": "ADMIN only",
+      "step1_status": "동일. 변경 없음."
+    }
+  },
+
+  "changes_summary": {
+    "title": "Step-1 대비 변경사항 종합",
+
+    "new_fields": [
+      { "api": "(1) 고객 조회", "fields": ["grade", "activeAsCount", "registrationCount", "address"], "reason": "프로필 카드 VIP 뱃지, 진행 건수 분리, 정품등록 표시, 출고 자동 채움" },
+      { "api": "(2) 구매이력", "fields": ["linkedTicketStatus", "sort"], "reason": "A/S 상태 뱃지, DataTable 정렬" },
+      { "api": "(3) 상담이력", "fields": ["channelLabel", "direction", "content", "from/to 필터", "channel 필터"], "reason": "채널 라벨, 통화 방향, 상세 패널, 기간/채널 필터" },
+      { "api": "(4) 관련티켓", "fields": ["ticketTypeLabel", "statusLabel", "비용 4필드", "symptom", "productName", "status 필터"], "reason": "한글 라벨, 비용 표시, 증상 요약, 제품명, 상태 필터" }
+    ],
+
+    "new_params": [
+      { "api": "(2)", "param": "sort", "reason": "DataTable 서버사이드 정렬" },
+      { "api": "(3)", "params": ["channel", "from", "to"], "reason": "채널/기간 필터" },
+      { "api": "(4)", "param": "status", "reason": "상태 필터" }
+    ],
+
+    "unchanged": [
+      "모든 API 경로 (Step-1과 100% 일치)",
+      "인증 방식 (JWT Bearer)",
+      "RBAC 규칙 (ALL for read)",
+      "페이지네이션 구조 (PageResponse<T>)",
+      "보조 API 5개 (registrations, memos CRUD, create/update customer)"
+    ],
+
+    "total_changes": {
+      "new_response_fields": 17,
+      "new_query_params": 5,
+      "changed_fields": 2,
+      "unchanged_apis": 5,
+      "api_path_changes": 0
+    }
+  }
+}

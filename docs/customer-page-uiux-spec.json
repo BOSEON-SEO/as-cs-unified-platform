@@ -1,0 +1,392 @@
+{
+  "meta": {
+    "document": "CustomerPage UI/UX Requirements Specification",
+    "createdAt": "2026-04-29",
+    "route": "/1",
+    "breakpoint": "520px (desktop: @custom-variant desktop)",
+    "designTokens": "src/index.css :root CSS variables (16 tokens)"
+  },
+
+  "step1_current_state": {
+    "file": "src/pages/CustomerPage.tsx",
+    "lines": 10,
+    "status": "placeholder only: <h1> + <p> + <div class='placeholder-card'>",
+    "features_implemented": "NONE",
+    "screenshot_desc": "페이지 타이틀 '고객 정보 조회' + '전화번호 기반 통합 고객 뷰' 설명 + 빈 점선 카드 'Phase 3 에서 구현 예정'"
+  },
+
+  "section1_search_area": {
+    "title": "A. 전화번호 입력 영역",
+
+    "layout": {
+      "desktop": "flex row: [PhoneInput 220px] [NameInput 160px] [ScopeSelect 140px] [SearchBtn] [ResetBtn]",
+      "mobile": "flex column: [PhoneInput 100%] → [SearchBtn + ResetBtn row]",
+      "wrapper": "card (bg-white, border, rounded-10, padding-16)"
+    },
+
+    "phone_input": {
+      "element": "input",
+      "type": "tel",
+      "inputMode": "numeric",
+      "label": "전화번호 *",
+      "placeholder": "010-0000-0000",
+      "width": "220px (desktop), 100% (mobile)",
+      "required": true,
+      "behavior": {
+        "auto_hyphen": "숫자 입력 시 010-1234-5678 형태로 하이픈 자동 삽입. 비숫자 문자 입력 차단.",
+        "validation": "regex /^01[016789]-?\\d{3,4}-?\\d{4}$/. 불완전 입력 시 빨간 테두리 + '유효한 전화번호를 입력하세요' 인라인 에러.",
+        "submit": "Enter 키 → 조회 실행 (SearchBtn click과 동일)",
+        "focus": "페이지 진입 시 자동 포커스 (autoFocus)"
+      },
+      "style": "font-family: monospace. border: 1px solid var(--color-border). focus: border-color var(--color-primary-light) + ring."
+    },
+
+    "name_input": {
+      "element": "input",
+      "type": "text",
+      "label": "고객명",
+      "placeholder": "(선택)",
+      "width": "160px (desktop), hidden (mobile — 검색 결과 0건일 때만 표시)",
+      "required": false,
+      "behavior": "보조 필터. 전화번호 검색 후 복수 결과 시 이름으로 좁히기."
+    },
+
+    "scope_select": {
+      "element": "select",
+      "label": "조회 범위",
+      "width": "140px (desktop), hidden (mobile)",
+      "options": [
+        { "value": "", "label": "전체" },
+        { "value": "has_purchase", "label": "구매 이력 있음" },
+        { "value": "has_as", "label": "A/S 이력 있음" },
+        { "value": "has_consult", "label": "상담 이력 있음" }
+      ],
+      "default": "",
+      "required": false
+    },
+
+    "search_button": {
+      "label": "🔍 조회",
+      "style": "btn-primary (bg-[var(--color-primary)], text-white, rounded-7, px-14, py-7, text-12, font-semibold)",
+      "behavior": {
+        "click": "validate phone → call GET /api/customers?phone={phone}&name={name}",
+        "loading": "button text → spinner + '조회 중...' disabled",
+        "keyboard": "Enter key in PhoneInput triggers this"
+      }
+    },
+
+    "reset_button": {
+      "label": "초기화",
+      "style": "btn-secondary (bg-white, border, text-[var(--color-text-secondary)])",
+      "behavior": "Clear phone, name, scope. Clear customer data. Reset URL params."
+    },
+
+    "result_branching": {
+      "0_results": {
+        "display": "EmptyState component: illustration + '검색 결과가 없습니다' + [신규 고객 등록] CTA button",
+        "cta_action": "Open inline registration form OR navigate to /customers/new"
+      },
+      "1_result": {
+        "display": "Immediately show CustomerProfileCard + 5 tabs below search bar"
+      },
+      "2_plus_results": {
+        "display": "MultipleResultModal: table with name, phone, email, grade. Click row → select that customer → show card + tabs.",
+        "modal_columns": ["고객명", "전화번호", "이메일", "등급", "최근 구매일"],
+        "modal_style": "Modal component (size='md', closeOnOverlay=true)"
+      }
+    },
+
+    "url_state": {
+      "pattern": "/1?phone=010-1234-5678",
+      "behavior": "phone param reflects in URL. Browser back button restores previous search. Share URL → same customer."
+    },
+
+    "improvements_vs_step1": [
+      "ADDED: 전화번호 자동 하이픈 삽입 (Step-1은 raw input)",
+      "ADDED: 페이지 진입 시 autoFocus",
+      "ADDED: Enter 키 제출",
+      "ADDED: 복수 결과 선택 모달 (기존 어드민: 첫 번째만 표시)",
+      "ADDED: 0건 시 EmptyState + 신규 등록 CTA",
+      "ADDED: URL search params 반영 (뒤로가기/공유)",
+      "ADDED: loading spinner on search button"
+    ]
+  },
+
+  "section2_customer_card": {
+    "title": "B. 고객 프로필 카드",
+
+    "layout": {
+      "desktop": "card with gradient background (linear-gradient 135deg #EFF6FF → #FFF). 좌측 아바타 + 이름/뱃지, 우측 KPI 5열 grid.",
+      "mobile": "아바타 + 이름 상단. KPI 2열 grid 하단."
+    },
+
+    "avatar": {
+      "size": "54px circle (desktop), 40px (mobile)",
+      "background": "linear-gradient(135deg, #3B82F6, #8B5CF6)",
+      "content": "고객명 첫 2글자 (예: '김민')",
+      "font": "18px font-weight-700 text-white"
+    },
+
+    "primary_info": {
+      "name_line": {
+        "content": "{name} {VIP badge?} {정품등록 badge?}",
+        "name_style": "text-18, font-weight-800",
+        "vip_badge": "badge b-green ('VIP'). Condition: grade === 'VIP'",
+        "registration_badge": "badge b-blue ('정품 N건'). Clickable → activates 정품등록 tab"
+      },
+      "contact_line": {
+        "content": "{phone} · {email} · 가입 {registeredAt}",
+        "style": "text-12, color-muted"
+      }
+    },
+
+    "kpi_row": {
+      "layout": "grid 5 columns (desktop), 2 columns (mobile)",
+      "items": [
+        { "label": "총 구매 금액", "field": "totalPurchaseAmount", "format": "Intl.NumberFormat('ko-KR') + '원'", "style": "text-14, font-weight-700" },
+        { "label": "최근 구매", "field": "lastPurchaseDate", "format": "YYYY-MM-DD", "fallback": "—" },
+        { "label": "A/S 건수", "field": "asCount + activeAsCount", "format": "{asCount}건 (진행 {activeAsCount})", "highlight_if": "activeAsCount > 0 → amber" },
+        { "label": "최근 상담", "field": "lastConsultationDate", "format": "YYYY-MM-DD", "fallback": "—" },
+        { "label": "정품등록", "field": "registrationCount", "format": "{registrationCount}건 / 보증 유효", "suffix": "warrantyStatus" }
+      ]
+    },
+
+    "action_buttons": {
+      "layout": "flex row, right-aligned on desktop, full-width on mobile",
+      "buttons": [
+        { "label": "정보 편집", "style": "btn-secondary btn-sm", "rbac": "ADMIN only (Can component)", "action": "Open edit modal" },
+        { "label": "+ A/S 접수", "style": "btn-primary btn-sm", "rbac": "AS_ENGINEER, TEAM_LEAD, ADMIN", "action": "Navigate to /tickets/new?phone={phone}" }
+      ]
+    },
+
+    "improvements_vs_step1": [
+      "ADDED: gradient background card (Step-1 placeholder는 plain)",
+      "ADDED: 아바타 (이름 첫 2글자, gradient circle)",
+      "ADDED: KPI 5열 grid with responsive 2열 mobile",
+      "ADDED: VIP/정품등록 뱃지 (clickable)",
+      "ADDED: RBAC-gated action buttons (Can component)",
+      "ADDED: 진행 건수 amber 하이라이트"
+    ]
+  },
+
+  "section3_purchase_history": {
+    "title": "C. 구매이력 목록",
+
+    "tab_label": "구매이력 ({count})",
+    "default_active": true,
+    "api": "GET /api/customers/{id}/orders?page=0&size=20&sort=orderDate,desc",
+
+    "table": {
+      "component": "DataTable (재사용)",
+      "columns": [
+        { "key": "orderId", "header": "주문번호", "width": "100px", "sortable": true, "render": "monospace font" },
+        { "key": "orderDate", "header": "주문일", "width": "100px", "sortable": true, "render": "YYYY-MM-DD" },
+        { "key": "productName", "header": "제품", "width": "auto", "sortable": true },
+        { "key": "productModel", "header": "모델", "width": "80px", "sortable": false, "render": "code font" },
+        { "key": "amount", "header": "금액", "width": "100px", "sortable": true, "render": "Intl.NumberFormat('ko-KR')", "align": "right" },
+        { "key": "deliveryStatus", "header": "배송", "width": "80px", "sortable": false, "render": "StatusBadge (PENDING=slate, SHIPPED=blue, DELIVERED=green)" },
+        { "key": "linkedTicketNo", "header": "A/S", "width": "100px", "sortable": false, "render": "linkedTicketNo ? Badge(amber, ticketNo) + click→navigate : '—'" },
+        { "key": "actions", "header": "", "width": "80px", "sortable": false, "render": "action button" }
+      ],
+      "total_columns": 8,
+      "mobile_columns": ["productName", "amount", "deliveryStatus"]
+    },
+
+    "sorting": {
+      "default": "orderDate,desc (최신순)",
+      "server_side": true,
+      "sortable_columns": ["orderId", "orderDate", "productName", "amount"]
+    },
+
+    "pagination": {
+      "type": "Pagination component (재사용)",
+      "server_side": true,
+      "default_size": 20,
+      "size_options": [10, 20, 50]
+    },
+
+    "row_actions": {
+      "AS_ENGINEER": { "button": "+ A/S", "style": "btn-primary btn-sm", "action": "Navigate to /tickets/new?phone={phone}&orderId={orderId}&productModel={productModel}" },
+      "CS_CX": { "button": "조회", "style": "btn-secondary btn-sm", "action": "Navigate to order detail (if exists)" },
+      "TEAM_LEAD": { "button": "조회", "style": "btn-secondary btn-sm" },
+      "ADMIN": { "button": "+ A/S", "style": "btn-primary btn-sm" }
+    },
+
+    "row_click": "No row click (action button instead)",
+
+    "empty_state": "'구매 이력이 없습니다'",
+
+    "improvements_vs_step1": [
+      "ADDED: linkedTicketNo column with A/S status badge (Step-1 prototype에서 보여주지만 Step-1 코드에 미구현)",
+      "ADDED: server-side sorting (4 columns)",
+      "ADDED: role-based action buttons (AS_ENGINEER: +A/S, CS_CX: 조회)",
+      "ADDED: StatusBadge for deliveryStatus (color-coded)",
+      "ADDED: mobile responsive (3 columns only)",
+      "IMPROVED: pagination with page size selector"
+    ]
+  },
+
+  "section4_related_tickets": {
+    "title": "D. 연관 티켓 목록",
+
+    "tab_label": "A/S이력 ({count})",
+    "default_active": false,
+    "api": "GET /api/customers/{id}/tickets?page=0&size=20&sort=createdAt,desc",
+
+    "table": {
+      "component": "DataTable (재사용)",
+      "columns": [
+        { "key": "ticketNo", "header": "A/S#", "width": "100px", "sortable": true, "render": "bold, link-style (blue underline on hover)" },
+        { "key": "productModel", "header": "제품", "width": "80px", "sortable": true },
+        { "key": "ticketTypeLabel", "header": "유형", "width": "70px", "sortable": false, "render": "StatusBadge (REPAIR=blue, EXCHANGE=amber, RETURN=red)" },
+        { "key": "assigneeName", "header": "담당", "width": "80px", "sortable": true, "render": "text, null → '미배정' (muted)" },
+        { "key": "statusLabel", "header": "상태", "width": "80px", "sortable": true, "render": "StatusBadge (8 status colors from TICKET_STATUS_LABELS)" },
+        { "key": "createdAt", "header": "접수일", "width": "100px", "sortable": true, "render": "YYYY-MM-DD" },
+        { "key": "elapsedDays", "header": "경과", "width": "60px", "sortable": true, "render": "{N}일. >=14 → red, >=7 → amber" }
+      ],
+      "total_columns": 7,
+      "mobile_columns": ["ticketNo", "statusLabel", "createdAt"]
+    },
+
+    "sorting": {
+      "default": "createdAt,desc",
+      "server_side": true,
+      "sortable_columns": ["ticketNo", "productModel", "assigneeName", "statusLabel", "createdAt", "elapsedDays"]
+    },
+
+    "filtering": {
+      "inline_filter": "status dropdown above table. Options: 전체/접수/배정됨/진행중/완료/취소/보류",
+      "api_param": "status=IN_PROGRESS"
+    },
+
+    "pagination": {
+      "type": "Pagination (재사용)",
+      "server_side": true,
+      "default_size": 20
+    },
+
+    "row_click": {
+      "action": "Navigate to /tickets/{ticketId}",
+      "cursor": "pointer",
+      "hover": "bg-[#F8FAFC]"
+    },
+
+    "row_highlight": {
+      "rules": [
+        { "condition": "status === 'CANCELLED'", "class": "opacity-50" },
+        { "condition": "elapsedDays >= 14", "class": "text-red" },
+        { "condition": "status === 'IN_PROGRESS' && elapsedDays >= 7", "class": "border-l-3 border-amber" }
+      ]
+    },
+
+    "empty_state": "'A/S 이력이 없습니다'",
+
+    "improvements_vs_step1": [
+      "ADDED: row click → navigate to ticket detail (Step-1 placeholder has no navigation)",
+      "ADDED: inline status filter dropdown",
+      "ADDED: row highlight rules (elapsed days warning)",
+      "ADDED: 7 sortable columns (server-side)",
+      "ADDED: StatusBadge for both ticketType and status",
+      "ADDED: elapsedDays with color-coded warning (>=7 amber, >=14 red)",
+      "ADDED: 'assigneeName' column for team lead's assignment overview"
+    ]
+  },
+
+  "section5_other_tabs": {
+    "title": "E. 나머지 3개 탭 (요약)",
+
+    "tab3_consultation": {
+      "label": "상담이력 ({count})",
+      "api": "GET /api/customers/{id}/consults?page=0&size=20",
+      "columns": ["일시", "채널 (StatusBadge)", "요약", "담당", "A/S연결"],
+      "interaction": "행 클릭 → SidePanel 열림 (통화 전문 표시)",
+      "actions_cscx": "[📧 이메일] [📱 SMS] 발송 버튼 (Can permission='mail:write')"
+    },
+
+    "tab4_registration": {
+      "label": "정품등록 ({count})",
+      "api": "GET /api/customers/{id}/registrations",
+      "layout": "Card grid (not table). 시리얼, 모델, 보증만료, 쿠폰상태.",
+      "no_pagination": "고객당 1~5건"
+    },
+
+    "tab5_memo": {
+      "label": "메모",
+      "api_read": "GET /api/customers/{id}/memos",
+      "api_write": "POST /api/customers/{id}/memos",
+      "layout": "Timeline (작성자, 시각, 내용). MemoForm textarea at top.",
+      "write_rbac": "CS_CX, TEAM_LEAD, ADMIN"
+    }
+  },
+
+  "section6_interaction_patterns": {
+    "title": "F. 인터랙션 패턴",
+
+    "tab_switching": {
+      "behavior": "Click tab → set activeTab state → lazy-mount tab component → react-query fetch (enabled=true only for active tab)",
+      "cache": "이전 탭 데이터는 react-query staleTime(30s) 동안 캐시. 탭 재진입 시 즉시 표시, 백그라운드 refetch.",
+      "animation": "fadeIn 0.2s ease (CSS in index.css)"
+    },
+
+    "loading_states": {
+      "search_loading": "SearchButton: spinner + '조회 중...' disabled",
+      "tab_loading": "DataTable loading prop: skeleton rows + '불러오는 중...'",
+      "card_loading": "Profile card skeleton: gray pulse animation for avatar, name, KPIs"
+    },
+
+    "error_handling": {
+      "network_error": "Toast: '네트워크 연결을 확인해 주세요.' (apiClient parseApiError)",
+      "404_customer": "Empty state: '해당 전화번호의 고객을 찾을 수 없습니다'",
+      "server_error": "Toast: '서버 오류가 발생했습니다'"
+    },
+
+    "keyboard": {
+      "enter_in_phone": "Submit search",
+      "escape_in_modal": "Close multiple-result modal",
+      "tab_key": "Navigate between form elements"
+    }
+  },
+
+  "section7_improvements_summary": {
+    "title": "G. Step-1 대비 개선사항 총괄",
+
+    "from_placeholder_to_full": {
+      "before": "10줄 placeholder (<h1> + <p> + <div class='placeholder-card'>)",
+      "after": "~300줄 full page (search + profile + 5 tabs with DataTable/SidePanel/Timeline)"
+    },
+
+    "new_features": [
+      "전화번호 하이픈 자동 삽입 + autoFocus + Enter 제출",
+      "검색 결과 분기 (0건/1건/2건+) + 복수 선택 모달",
+      "URL search params (?phone=) 반영 → 뒤로가기/공유 가능",
+      "고객 프로필 카드: gradient 배경 + 아바타 + VIP/정품 뱃지 + KPI 5열",
+      "5개 탭 lazy-loading + react-query 캐싱",
+      "구매이력: 서버사이드 정렬 + A/S 연결 뱃지 + 역할별 액션 버튼",
+      "A/S이력: 행 클릭 → 티켓 상세 네비게이션 + 상태 필터 + 경과일 경고 색상",
+      "상담이력: SidePanel 상세 + 이메일/SMS 발송 액션",
+      "정품등록: 카드 그리드 + 쿠폰/보증 상태",
+      "메모: 타임라인 + CRUD (24h 수정 제한)",
+      "역할별 UI 분기 (Can 컴포넌트 + RBAC)",
+      "반응형 (520px): KPI 2열, 테이블 컬럼 축소, 탭 가로 스크롤"
+    ],
+
+    "component_count": {
+      "before": 1,
+      "after": 12,
+      "list": [
+        "CustomerPage (page container)",
+        "CustomerSearchBar (phone + name + scope + buttons)",
+        "CustomerProfileCard (avatar + name + KPIs + actions)",
+        "PurchaseHistoryTab (DataTable)",
+        "AsHistoryTab (DataTable + status filter)",
+        "ConsultationTab (DataTable + SidePanel)",
+        "ProductRegistrationTab (Card grid)",
+        "MemoTab (Timeline + MemoForm)",
+        "MultipleResultModal (select from 2+ results)",
+        "EmptyState (0 results + CTA)",
+        "EditCustomerModal (ADMIN only)",
+        "SidePanel (consultation detail)"
+      ]
+    }
+  }
+}

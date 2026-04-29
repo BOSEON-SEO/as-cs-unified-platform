@@ -1,0 +1,464 @@
+{
+  "meta": {
+    "document": "Bidirectional Navigation Architecture — Customer ↔ Ticket",
+    "createdAt": "2026-04-29",
+    "scope": "CustomerPage ↔ TicketDetailPage ↔ ConsultationPage cross-navigation",
+    "currentIssue": "router.tsx has TicketDetailPage at fixed '/4' path — cannot navigate to specific ticket",
+    "dependencies": "react-router-dom ^7.6.1 (installed), zustand+react-query (NOT installed)"
+  },
+
+  "section1_customer_to_ticket": {
+    "title": "(1) CustomerPage → TicketDetailPage Navigation",
+
+    "current_state": {
+      "problem": "TicketDetailPage is at fixed path '/4'. No dynamic route '/tickets/:id'. Cannot navigate to a specific ticket.",
+      "router_line": "{ path: '4', element: <TicketDetailPage /> }  // line 81 of router.tsx"
+    },
+
+    "target_navigation_flows": [
+      {
+        "id": "NAV-1a",
+        "from": "CustomerPage > A/S이력 탭 > 티켓 행 클릭",
+        "to": "/tickets/{ticketId}",
+        "data_passed": "ticketId (from row data)",
+        "method": "useNavigate() or <Link>",
+        "code": "navigate(`/tickets/${ticket.ticketId}`)"
+      },
+      {
+        "id": "NAV-1b",
+        "from": "CustomerPage > 구매이력 탭 > [+ A/S 접수] 버튼",
+        "to": "/tickets/new?phone={phone}&orderId={orderId}&productModel={model}",
+        "data_passed": "URL search params (customer + product context)",
+        "method": "navigate(`/tickets/new?phone=${phone}&orderId=${orderId}&productModel=${model}`)",
+        "note": "TicketCreatePage reads search params → auto-fills customer and product"
+      },
+      {
+        "id": "NAV-1c",
+        "from": "CustomerPage > 프로필 카드 > [+ A/S 접수] 버튼",
+        "to": "/tickets/new?phone={phone}",
+        "data_passed": "phone only (product selection on create page)",
+        "method": "navigate(`/tickets/new?phone=${customer.phone}`)"
+      },
+      {
+        "id": "NAV-1d",
+        "from": "ConsultationPage > SidePanel > [+ A/S 접수] 버튼",
+        "to": "/tickets/new?phone={phone}&consultationId={id}",
+        "data_passed": "phone + consultationId (link consultation to new ticket)",
+        "method": "navigate(`/tickets/new?phone=${phone}&consultationId=${consultId}`)"
+      }
+    ]
+  },
+
+  "section2_ticket_to_customer": {
+    "title": "(2) TicketDetailPage → CustomerPage Back-Navigation",
+
+    "navigation_flows": [
+      {
+        "id": "NAV-2a",
+        "from": "TicketDetailPage > CustomerInfoCard > 고객명 클릭",
+        "to": "/1?phone={customerPhone}",
+        "method": "navigate(`/1?phone=${ticket.customerPhone}`)",
+        "note": "CustomerPage reads ?phone from URL → auto-searches → displays customer"
+      },
+      {
+        "id": "NAV-2b",
+        "from": "TicketDetailPage > Header breadcrumb > '고객 정보' 클릭",
+        "to": "/1?phone={customerPhone}",
+        "note": "Breadcrumb: 홈 > 고객(김민수) > AS-2641. '고객(김민수)' is clickable link."
+      },
+      {
+        "id": "NAV-2c",
+        "from": "Browser back button",
+        "to": "Previous page (browser history)",
+        "method": "Built-in browser history. react-router handles it.",
+        "note": "If user came from CustomerPage, back button returns to CustomerPage with same search state (?phone= preserved)"
+      },
+      {
+        "id": "NAV-2d",
+        "from": "TicketDetailPage > Timeline > 관련 상담 이벤트 클릭",
+        "to": "/2?consultationId={id}",
+        "method": "navigate(`/2?consultationId=${eventPayload.consultationId}`)",
+        "note": "ConsultationPage reads ?consultationId → auto-opens that consultation in SidePanel"
+      }
+    ],
+
+    "customer_context_in_ticket_detail": {
+      "display": "Right panel: CustomerInfoCard (name, phone, grade, address, recent purchase)",
+      "api": "Ticket detail API includes customer snapshot: { customerName, customerPhone, customerGrade }",
+      "full_customer_link": "Click customer name → /1?phone={phone} (full customer view)"
+    }
+  },
+
+  "section3_router_structure": {
+    "title": "(3) React Router Structure — Required Changes",
+
+    "current_router_issues": [
+      "TicketDetailPage at fixed '/4' — cannot pass ticketId",
+      "No '/tickets/new' route for ticket creation",
+      "No '/login' route for authentication",
+      "No '/unauthorized' route for RBAC fallback",
+      "All 17 pages are eagerly imported (no lazy loading)",
+      "routesMeta in router.tsx duplicates navGroups in Sidebar.tsx"
+    ],
+
+    "target_router": {
+      "file": "src/router.tsx",
+      "structure": [
+        "createBrowserRouter([",
+        "  {",
+        "    path: '/',",
+        "    element: <AppLayout />,  // existing shell",
+        "    children: [",
+        "      // === Public (no auth) ===",
+        "      // (none currently — login is separate layout)",
+        "",
+        "      // === Protected (RequireAuth wrapper) ===",
+        "      { index: true, element: <DashboardPage /> },",
+        "",
+        "      // Customer & Consultation",
+        "      { path: '1', element: <CustomerPage /> },          // /1?phone=010-...",
+        "      { path: '2', element: <ConsultationPage /> },      // /2?consultationId=...",
+        "      { path: '3', element: <ZendeskPage /> },",
+        "",
+        "      // Tickets (NEW: dynamic routes)",
+        "      { path: 'tickets', element: <TicketListPage /> },  // /tickets",
+        "      { path: 'tickets/new', element: <TicketCreatePage /> },  // /tickets/new?phone=...",
+        "      { path: 'tickets/:ticketId', element: <TicketDetailPage /> },  // /tickets/123",
+        "",
+        "      // Operations",
+        "      { path: '6', element: <CostTrackingPage /> },",
+        "      { path: '7', element: <ShipmentPage /> },",
+        "      { path: '8', element: <RecallPage /> },",
+        "      { path: '9', element: <ProductRegistrationPage /> },",
+        "      { path: '10', element: <ExchangeReturnPage /> },",
+        "      { path: '11', element: <MailLogPage /> },",
+        "      { path: 'ai', element: <AiSupportPage /> },",
+        "",
+        "      // Management",
+        "      { path: '12', element: <TicketAssignPage /> },",
+        "      { path: '13', element: <ReportPage /> },",
+        "      { path: '14', element: <StatisticsPage /> },",
+        "      { path: '15', element: <SettingsPage /> },",
+        "",
+        "      // Fallback",
+        "      { path: 'unauthorized', element: <UnauthorizedPage /> },",
+        "      { path: '*', element: <NotFoundPage /> },",
+        "    ],",
+        "  },",
+        "  // Auth layout (no sidebar)",
+        "  {",
+        "    path: '/login',",
+        "    element: <AuthLayout />,",
+        "    children: [",
+        "      { index: true, element: <LoginPage /> },",
+        "    ],",
+        "  },",
+        "])"
+      ],
+
+      "key_changes": [
+        { "change": "REMOVE: { path: '4', element: <TicketDetailPage /> }", "reason": "Fixed path cannot accept ticketId" },
+        { "change": "ADD: { path: 'tickets/new', element: <TicketCreatePage /> }", "reason": "Ticket creation page with URL params" },
+        { "change": "ADD: { path: 'tickets/:ticketId', element: <TicketDetailPage /> }", "reason": "Dynamic route for ticket detail. useParams() to get ticketId." },
+        { "change": "ADD: { path: 'unauthorized', element: <UnauthorizedPage /> }", "reason": "RBAC fallback page" },
+        { "change": "ADD: { path: '*', element: <NotFoundPage /> }", "reason": "404 catch-all" },
+        { "change": "ADD: /login separate layout", "reason": "Login page has no sidebar/header" },
+        { "change": "ORDER: 'tickets/new' BEFORE 'tickets/:ticketId'", "reason": "'new' would match :ticketId if placed after" }
+      ],
+
+      "route_order_critical": "tickets/new MUST be before tickets/:ticketId. Otherwise 'new' is parsed as a ticketId parameter."
+    },
+
+    "url_param_patterns": {
+      "customer_search": "/1?phone=010-1234-5678",
+      "consultation_detail": "/2?consultationId=5001",
+      "ticket_create_from_customer": "/tickets/new?phone=010-1234-5678&orderId=ORD-26-041&productModel=WE-300",
+      "ticket_create_from_consult": "/tickets/new?phone=010-1234-5678&consultationId=5001",
+      "ticket_detail": "/tickets/2641"
+    },
+
+    "breadcrumb_enhancement": {
+      "current": "Header.tsx uses routesMeta.find(r => r.path === pathname) — exact match only",
+      "problem": "/tickets/2641 does not match any routesMeta path. Breadcrumb shows fallback '대시보드'.",
+      "solution": "Enhance breadcrumb to handle dynamic routes. For /tickets/:ticketId, show: '홈 > A/S 티켓 목록 > AS-2641'. For /1?phone=..., show: '홈 > 고객 정보 조회 > 김민수'.",
+      "implementation": "Pattern match: if pathname.startsWith('/tickets/') and has segment after → ticket detail breadcrumb. Use ticket data from react-query cache for ticket number display."
+    }
+  },
+
+  "section4_state_management": {
+    "title": "(4) State Management Strategy",
+
+    "decision": "zustand (client state) + @tanstack/react-query (server state). NOT Redux, NOT Context.",
+
+    "rationale": {
+      "vs_redux": [
+        "Redux is overkill for 12 users + 15 pages. zustand is 1.1KB with zero boilerplate.",
+        "This app's state is 95% server state (tickets, customers, costs) → react-query handles it.",
+        "Client state is minimal: auth user, sidebar toggle, toast queue.",
+        "Redux DevTools equivalent exists for both zustand (zustand/middleware) and react-query (ReactQueryDevtools)."
+      ],
+      "vs_context": [
+        "Context causes unnecessary re-renders when any part of context changes.",
+        "Multiple contexts (AuthContext, UIContext, ...) quickly becomes context hell.",
+        "zustand's selector pattern (useStore(s => s.field)) only re-renders when selected field changes.",
+        "Context doesn't persist across page reloads. zustand persist middleware does."
+      ]
+    },
+
+    "stores": {
+      "authStore": {
+        "purpose": "Auth/session state",
+        "fields": ["user", "token", "refreshToken", "isLoading", "error"],
+        "persist": "localStorage (user + tokens only)",
+        "used_by": ["RequireAuth guard", "Can component", "apiClient interceptor", "Sidebar RBAC filter"]
+      },
+      "uiStore": {
+        "purpose": "UI-only ephemeral state",
+        "fields": ["sidebarOpen", "toasts[]", "confirmDialog"],
+        "persist": false,
+        "note": "Replaces AppLayout's useState(sidebarOpen). Shared across components without prop drilling."
+      }
+    },
+
+    "server_state_via_react_query": {
+      "principle": "All data from API is managed by react-query. No zustand for server data.",
+      "benefits": [
+        "Automatic caching (staleTime 30s → same ticket detail not refetched within 30s)",
+        "Background refetch on window focus (disabled for this app)",
+        "Mutation + invalidation (create ticket → invalidate ticket list cache)",
+        "Loading/error states built-in (no manual isLoading/error in stores)"
+      ],
+
+      "navigation_caching": {
+        "scenario": "User on CustomerPage(phone=010-1234-5678) → clicks ticket AS-2641 → TicketDetailPage → clicks back → CustomerPage",
+        "behavior": [
+          "1. CustomerPage fetches customer data: queryKey ['customer', 'phone', '010-1234-5678'] → cached",
+          "2. CustomerPage fetches purchases: queryKey ['customer', 1001, 'orders'] → cached",
+          "3. User navigates to /tickets/2641",
+          "4. TicketDetailPage fetches ticket: queryKey ['tickets', '2641'] → cached",
+          "5. User clicks back button → browser navigates to /1?phone=010-1234-5678",
+          "6. CustomerPage remounts → react-query checks cache → staleTime not expired → INSTANT display (no loading spinner)",
+          "7. If staleTime expired → shows cached data immediately + background refetch → updates if changed"
+        ],
+        "result": "Back navigation is INSTANT. No re-fetch. No loading flash."
+      }
+    },
+
+    "cross_page_data_sharing": {
+      "pattern": "URL params + react-query cache. NOT global store.",
+      "examples": [
+        {
+          "flow": "CustomerPage → TicketCreatePage",
+          "data": "phone, orderId, productModel",
+          "method": "URL search params: /tickets/new?phone=010-1234-5678&productModel=WE-300",
+          "why_not_store": "URL params are shareable, bookmarkable, survive page refresh. Store state is lost on refresh."
+        },
+        {
+          "flow": "TicketDetailPage → CustomerPage",
+          "data": "customerPhone",
+          "method": "URL param: /1?phone=010-1234-5678",
+          "react_query_bonus": "If customer was already fetched by TicketDetailPage's CustomerInfoCard, react-query cache has ['customer', 'phone', '010-1234-5678'] → CustomerPage instant."
+        }
+      ]
+    }
+  },
+
+  "section5_api_call_flow_and_caching": {
+    "title": "(5) API Call Flow & Caching Strategy",
+
+    "query_keys": {
+      "convention": "['domain', ...identifiers, 'sub-resource?']",
+      "customer_keys": [
+        "['customer', 'phone', '010-1234-5678']  → customer profile",
+        "['customer', 1001, 'orders', { page, size, sort }]  → purchase history",
+        "['customer', 1001, 'tickets', { page, status }]  → AS history",
+        "['customer', 1001, 'consults', { page, channel }]  → consultation history",
+        "['customer', 1001, 'registrations']  → product registrations",
+        "['customer', 1001, 'memos']  → memos"
+      ],
+      "ticket_keys": [
+        "['tickets', { scope, status, page, sort }]  → ticket list",
+        "['tickets', 'summary', scope]  → KPI summary",
+        "['tickets', '2641']  → ticket detail",
+        "['tickets', '2641', 'timeline']  → event timeline",
+        "['tickets', '2641', 'costs']  → cost entries",
+        "['tickets', 'unassigned']  → unassigned queue"
+      ],
+      "consultation_keys": [
+        "['consultations', { keyword, channel, type, agent, from, to, page }]  → consultation list",
+        "['consultations', 'summary']  → KPI",
+        "['consultations', 5001]  → consultation detail"
+      ]
+    },
+
+    "caching_config": {
+      "defaults": {
+        "staleTime": "30_000 (30s) — data considered fresh for 30s",
+        "gcTime": "300_000 (5min) — cached data kept for 5min after unmount",
+        "retry": 1,
+        "refetchOnWindowFocus": false
+      },
+      "per_query_overrides": {
+        "customer_by_phone": { "staleTime": "60_000 (1min)", "reason": "Customer data changes rarely. Longer cache for instant back-nav." },
+        "ticket_detail": { "staleTime": "15_000 (15s)", "reason": "Ticket status changes frequently. Shorter cache." },
+        "consultation_summary_kpi": { "staleTime": "30_000", "refetchInterval": "30_000", "reason": "30s auto-refresh for dashboard KPI." },
+        "purchase_history": { "staleTime": "120_000 (2min)", "reason": "Purchase data rarely changes. Aggressive caching for tab switch performance." }
+      }
+    },
+
+    "mutation_invalidation": {
+      "create_ticket": {
+        "mutation": "POST /api/tickets",
+        "invalidate": ["['tickets']", "['tickets', 'summary']", "['tickets', 'unassigned']", "['customer', customerId, 'tickets']"],
+        "note": "Customer's AS history tab shows new ticket immediately after creation"
+      },
+      "close_ticket": {
+        "mutation": "PATCH /api/tickets/:id/close",
+        "invalidate": ["['tickets', ticketId]", "['tickets', 'summary']", "['customer', customerId, 'tickets']"]
+      },
+      "add_cost": {
+        "mutation": "POST /api/tickets/:id/costs",
+        "invalidate": ["['tickets', ticketId, 'costs']", "['costs', 'summary']"]
+      },
+      "send_message": {
+        "mutation": "POST /api/messages/send",
+        "invalidate": ["['consultations']", "['tickets', ticketId, 'timeline']"],
+        "note": "Email/SMS send creates MailLog + TicketEvent → both consultation list and ticket timeline need refresh"
+      }
+    },
+
+    "navigation_api_flow_diagram": [
+      "CustomerPage (/1?phone=010-1234-5678)",
+      "  → GET /api/customers?phone=010-1234-5678",
+      "  → cache: ['customer', 'phone', '010-1234-5678']",
+      "  → user clicks A/S이력 tab",
+      "  → GET /api/customers/1001/tickets?page=0",
+      "  → cache: ['customer', 1001, 'tickets', {page:0}]",
+      "  → user clicks ticket row AS-2641",
+      "  → navigate('/tickets/2641')",
+      "",
+      "TicketDetailPage (/tickets/2641)",
+      "  → GET /api/tickets/2641",
+      "  → cache: ['tickets', '2641']",
+      "  → response includes customerPhone: '010-1234-5678'",
+      "  → CustomerInfoCard uses cached ['customer', 'phone', '010-1234-5678'] if available",
+      "  → user clicks customer name",
+      "  → navigate('/1?phone=010-1234-5678')",
+      "",
+      "CustomerPage (back to /1?phone=010-1234-5678)",
+      "  → react-query checks ['customer', 'phone', '010-1234-5678']",
+      "  → staleTime 60s not expired → INSTANT render from cache",
+      "  → NO API call, NO loading spinner"
+    ]
+  },
+
+  "section6_technical_challenges": {
+    "title": "(6) Technical Challenges & Solutions",
+
+    "challenges": [
+      {
+        "id": "TC-1",
+        "challenge": "Header breadcrumb breaks for dynamic routes",
+        "detail": "routesMeta.find(r => r.path === pathname) fails for /tickets/2641 because no routesMeta entry has path '/tickets/2641'. Returns fallback dashboard.",
+        "solution": {
+          "approach": "Pattern-based breadcrumb resolver",
+          "implementation": [
+            "function resolveBreadcrumb(pathname: string): BreadcrumbItem[] {",
+            "  // Static routes",
+            "  const staticMatch = routesMeta.find(r => r.path === pathname);",
+            "  if (staticMatch) return [{ label: staticMatch.title, icon: staticMatch.icon }];",
+            "",
+            "  // Dynamic: /tickets/:id",
+            "  const ticketMatch = pathname.match(/^\\/tickets\\/(\\d+)$/);",
+            "  if (ticketMatch) {",
+            "    const ticketId = ticketMatch[1];",
+            "    // Try to get ticket number from react-query cache",
+            "    const cached = queryClient.getQueryData(['tickets', ticketId]);",
+            "    const ticketNo = cached?.ticketNo ?? `#${ticketId}`;",
+            "    return [",
+            "      { label: 'A/S 티켓 목록', path: '/tickets' },",
+            "      { label: ticketNo, icon: '🛠' },",
+            "    ];",
+            "  }",
+            "",
+            "  // Dynamic: /tickets/new",
+            "  if (pathname === '/tickets/new') {",
+            "    return [",
+            "      { label: 'A/S 티켓 목록', path: '/tickets' },",
+            "      { label: '신규 접수', icon: '➕' },",
+            "    ];",
+            "  }",
+            "",
+            "  return [{ label: '대시보드', icon: '📊' }];",
+            "}"
+          ],
+          "effort": "2h"
+        }
+      },
+      {
+        "id": "TC-2",
+        "challenge": "URL state vs component state conflict",
+        "detail": "CustomerPage uses ?phone= URL param. If user searches phone A, navigates to ticket, comes back — URL still has phone A. But if user then searches phone B without navigating away, URL updates. What if they go back again?",
+        "solution": {
+          "approach": "useSearchParams() as single source of truth",
+          "rules": [
+            "CustomerPage reads phone from useSearchParams(), not from component state.",
+            "Search action: setSearchParams({ phone: newPhone }) → URL updates → react-query refetches.",
+            "Browser back: URL reverts → component re-reads from URL → cache hit → instant.",
+            "No duplicate state: phone exists only in URL, never in useState or zustand."
+          ],
+          "code": "const [searchParams, setSearchParams] = useSearchParams();\nconst phone = searchParams.get('phone') ?? '';\nconst { data: customer } = useCustomerByPhone(phone);  // enabled when phone is valid"
+        }
+      },
+      {
+        "id": "TC-3",
+        "challenge": "TicketCreatePage needs context from multiple origins",
+        "detail": "TicketCreatePage can be reached from: CustomerPage (+A/S button), ConsultationPage (+A/S button), TicketListPage (+New button), Header quick action. Each passes different URL params.",
+        "solution": {
+          "approach": "URL search params with graceful degradation",
+          "params": {
+            "phone": "Always present → auto-lookup customer",
+            "orderId": "Optional → auto-fill product from order",
+            "productModel": "Optional → auto-select product model",
+            "consultationId": "Optional → link consultation to ticket",
+            "serialNumber": "Optional → auto-fill serial"
+          },
+          "behavior": "TicketCreatePage reads all params. If phone present → auto-search customer. If orderId → auto-fill product. If none → blank form.",
+          "code": "const [params] = useSearchParams();\nconst phone = params.get('phone');\nconst orderId = params.get('orderId');\n// If phone exists, auto-trigger customer lookup on mount"
+        }
+      },
+      {
+        "id": "TC-4",
+        "challenge": "Sidebar active state for dynamic routes",
+        "detail": "Sidebar uses NavLink with exact path matching. /tickets/2641 doesn't match '/tickets' so neither the list nor detail sidebar item highlights.",
+        "solution": {
+          "approach": "NavLink with custom isActive or startsWith matching",
+          "code": "// For ticket-related routes, match prefix\n<NavLink to='/tickets' end={false} className={({isActive}) => ...}>\n// end={false} makes /tickets/* match the /tickets nav item",
+          "note": "Only apply end={false} to routes with children (/tickets). Other routes like /1, /6 keep end={true} (default)."
+        }
+      },
+      {
+        "id": "TC-5",
+        "challenge": "react-query cache prefetching for navigation performance",
+        "detail": "When user hovers over a ticket row in CustomerPage's A/S이력 tab, we can prefetch that ticket's detail. So when they click, it's instant.",
+        "solution": {
+          "approach": "queryClient.prefetchQuery on row hover",
+          "code": "const queryClient = useQueryClient();\nconst handleRowHover = (ticketId: number) => {\n  queryClient.prefetchQuery({\n    queryKey: ['tickets', String(ticketId)],\n    queryFn: () => ticketApi.getById(ticketId),\n    staleTime: 30_000,\n  });\n};",
+          "trigger": "onMouseEnter on table row (desktop only, not mobile)",
+          "benefit": "Ticket detail page loads instantly (0ms) when user clicks — data already in cache."
+        }
+      },
+      {
+        "id": "TC-6",
+        "challenge": "Back navigation scroll position restoration",
+        "detail": "User scrolls down CustomerPage purchase list, clicks ticket, goes to TicketDetailPage, presses back. Page re-renders but scroll position is lost (top of page).",
+        "solution": {
+          "approach": "react-router v7 ScrollRestoration component",
+          "code": "// In AppLayout or router config:\nimport { ScrollRestoration } from 'react-router-dom';\n<ScrollRestoration />",
+          "note": "ScrollRestoration auto-saves scroll position per route. On back navigation, restores scroll. Built into react-router v7.",
+          "fallback": "If ScrollRestoration doesn't work with AppLayout's overflow-y-auto (main-content div), use manual scroll save in sessionStorage per route."
+        }
+      }
+    ]
+  }
+}

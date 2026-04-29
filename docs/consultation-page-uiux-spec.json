@@ -1,0 +1,509 @@
+{
+  "meta": {
+    "document": "ConsultationPage UI/UX Requirements Specification",
+    "createdAt": "2026-04-29",
+    "route": "/2",
+    "primaryUser": "CS/CX (4명) — 전담 워크플로우",
+    "dataScale": "crm_call_memo 402K + tbnws_send_sms_result 2.6M = 3M+ records",
+    "designPrinciple": "접근성 + 효율성 우선 (CS/CX가 전화 중 3초 이내 맥락 파악)"
+  },
+
+  "step1_current_state": {
+    "file": "src/pages/ConsultationPage.tsx",
+    "lines": 10,
+    "status": "placeholder: <h1> + <p> + placeholder-card",
+    "features": "NONE"
+  },
+
+  "section1_page_layout": {
+    "title": "A. 페이지 전체 레이아웃",
+
+    "desktop": {
+      "structure": [
+        "┌─────────────────────────────────────────────────────────────┐",
+        "│ [A] KPI Row — 5 cards                                      │",
+        "├─────────────────────────────────────────────────────────────┤",
+        "│ [B] FilterBar — keyword + channel + type + agent + date    │",
+        "├───────────────────────────────────┬─────────────────────────┤",
+        "│ [C] Consultation List (1.6fr)     │ [D] Detail Panel (1fr) │",
+        "│     DataTable + Pagination        │     SidePanel (sticky) │",
+        "└───────────────────────────────────┴─────────────────────────┘"
+      ],
+      "grid": "grid-template-columns: 1.6fr 1fr",
+      "note": "목록과 상세 패널이 나란히 표시 — 목록에서 행 클릭 → 우측 패널에 상세 즉시 표시 (페이지 이동 없음)"
+    },
+
+    "mobile": {
+      "structure": [
+        "┌───────────────────────┐",
+        "│ [A] KPI (2x2 grid)   │",
+        "├───────────────────────┤",
+        "│ [B] Filters (stacked)│",
+        "├───────────────────────┤",
+        "│ [C] Card list        │",
+        "│ (tap → full modal)   │",
+        "├───────────────────────┤",
+        "│ Pagination            │",
+        "└───────────────────────┘"
+      ],
+      "note": "모바일에서는 행 탭 → 풀스크린 상세 모달 (SidePanel 대신)"
+    }
+  },
+
+  "section2_kpi_row": {
+    "title": "B. KPI 카드 5종",
+
+    "layout": "grid-cols-5 (desktop), grid-cols-2 (mobile with 5th card spanning full)",
+    "api": "GET /api/consults/summary?from={today}&to={today}",
+    "auto_refresh": "30s polling (react-query refetchInterval)",
+
+    "cards": [
+      {
+        "key": "todayTotal",
+        "label": "금일 상담",
+        "value_example": "42",
+        "accent": "none",
+        "description": "오늘 00:00~현재까지 전체 채널 상담 건수"
+      },
+      {
+        "key": "phoneCount",
+        "label": "📞 전화",
+        "value_example": "28",
+        "accent": "blue",
+        "description": "금일 전화 인입 건수"
+      },
+      {
+        "key": "kakaoCount",
+        "label": "💬 카카오",
+        "value_example": "9",
+        "accent": "green",
+        "description": "금일 카카오톡 상담 건수"
+      },
+      {
+        "key": "emailSmsCount",
+        "label": "📧 이메일/SMS",
+        "value_example": "5",
+        "accent": "amber",
+        "description": "금일 이메일 + SMS 발송 합계"
+      },
+      {
+        "key": "asLinkedCount",
+        "label": "A/S 연결",
+        "value_example": "14",
+        "accent": "red",
+        "description": "금일 A/S 티켓과 연결된 상담 건수"
+      }
+    ],
+
+    "improvement_vs_step1": "NEW — Step-1 placeholder에는 KPI 없음. 프로토타입-v2에서 5종 KPI 정의."
+  },
+
+  "section3_filter_bar": {
+    "title": "C. 필터/검색 바",
+
+    "component": "FilterBar (공통 재사용)",
+    "layout": "flex-wrap row with search + 4 dropdowns + date range + buttons",
+
+    "fields": [
+      {
+        "key": "keyword",
+        "type": "text",
+        "placeholder": "전화번호 / 고객명 / 상담 내용",
+        "width": "flex-1, min-200px",
+        "behavior": "통합 검색. 서버에서 phone LIKE OR name LIKE OR content LIKE. debounce 300ms.",
+        "accessibility": "autoFocus on page load (CS/CX 전화 중 즉시 입력 시작)"
+      },
+      {
+        "key": "channel",
+        "type": "select",
+        "label": "채널",
+        "options": [
+          { "value": "", "label": "전체 채널" },
+          { "value": "PHONE", "label": "📞 전화" },
+          { "value": "KAKAO", "label": "💬 카카오" },
+          { "value": "EMAIL", "label": "📧 이메일" },
+          { "value": "SMS", "label": "📱 SMS" }
+        ],
+        "default": ""
+      },
+      {
+        "key": "consultType",
+        "type": "select",
+        "label": "상담유형",
+        "options": [
+          { "value": "", "label": "전체 유형" },
+          { "value": "PRODUCT_INQUIRY", "label": "제품 문의" },
+          { "value": "AS_INQUIRY", "label": "A/S 문의" },
+          { "value": "DELIVERY_INQUIRY", "label": "배송 문의" },
+          { "value": "EXCHANGE_RETURN", "label": "교환/반품" },
+          { "value": "OTHER", "label": "기타" }
+        ],
+        "default": ""
+      },
+      {
+        "key": "assignee",
+        "type": "select",
+        "label": "담당자",
+        "options_dynamic": "GET /api/assignees (user list)",
+        "default": "",
+        "rbac_behavior": {
+          "AS_ENGINEER": "본인 ID로 고정 (변경 불가, disabled)",
+          "CS_CX": "전체 + 담당자 목록 (본인 pre-selected)",
+          "TEAM_LEAD": "전체 + 담당자 목록",
+          "ADMIN": "전체 + 담당자 목록"
+        }
+      },
+      {
+        "key": "dateRange",
+        "type": "dateRange (from + to)",
+        "default_from": "today - 7 days",
+        "default_to": "today",
+        "label_from": "시작일",
+        "label_to": "종료일"
+      }
+    ],
+
+    "buttons": {
+      "search": { "label": "🔍 검색", "style": "btn-primary", "keyboard": "Enter in keyword" },
+      "reset": { "label": "초기화", "style": "btn-secondary", "behavior": "Reset all filters to defaults" }
+    },
+
+    "checkbox": {
+      "key": "myOnly",
+      "label": "내 상담만",
+      "behavior": "Toggle filter assignee=currentUserId. Shortcut for CS/CX.",
+      "position": "Header actions area (right of page title)"
+    },
+
+    "improvement_vs_step1": [
+      "NEW: 통합 키워드 검색 (phone + name + content)",
+      "NEW: 상담유형 필터 (5종)",
+      "NEW: 역할별 담당자 필터 분기 (AS_ENGINEER: 본인 고정)",
+      "NEW: '내 상담만' 체크박스 (quick filter)",
+      "NEW: 기본 기간 7일 (Step-1은 30일 → CS/CX 실무에 7일이 적합)"
+    ]
+  },
+
+  "section4_consultation_list": {
+    "title": "D. 상담 이력 목록 (타임라인/테이블 하이브리드)",
+
+    "api": "GET /api/consults?keyword=&channel=&consultType=&assignee=&dateFrom=&dateTo=&page=0&size=20&sort=occurredAt,desc",
+
+    "view_mode": {
+      "default": "table",
+      "toggle": "[테이블] [타임라인] 뷰 전환 토글 (우측 상단)",
+      "table_view": "DataTable component — 정렬 가능, 대량 데이터에 적합",
+      "timeline_view": "세로 타임라인 — 시간순, 채널 아이콘, 상담 요약 카드. CS/CX 선호."
+    },
+
+    "table_columns": [
+      { "key": "occurredAt", "header": "일시", "width": "130px", "sortable": true, "render": "MM-DD HH:mm (당일이면 HH:mm만)" },
+      { "key": "channel", "header": "채널", "width": "80px", "sortable": true, "render": "StatusBadge with icon (📞전화=blue, 💬카카오=green, 📧이메일=slate, 📱SMS=amber)" },
+      { "key": "customerName", "header": "고객", "width": "90px", "sortable": true, "render": "text. Click → navigate to /1?phone={phone}" },
+      { "key": "summary", "header": "요약", "width": "auto", "sortable": false, "render": "truncate 50chars. 키워드 highlight (yellow bg)" },
+      { "key": "agentName", "header": "담당", "width": "80px", "sortable": true },
+      { "key": "linkedTicketNo", "header": "A/S", "width": "90px", "sortable": false, "render": "ticketNo badge (amber, click → /tickets/{id}) or '—'" }
+    ],
+
+    "timeline_view_card": {
+      "layout": "vertical timeline with channel-colored dots",
+      "card_content": [
+        "line 1: {occurredAt} · {channelBadge} · {agentName}",
+        "line 2: {customerName} · {phone}",
+        "line 3: {summary} (truncate 100chars)",
+        "line 4: {linkedTicketNo badge} (if exists)"
+      ],
+      "dot_colors": {
+        "PHONE": "#3B82F6 (blue)",
+        "KAKAO": "#10B981 (green)",
+        "EMAIL": "#94A3B8 (slate)",
+        "SMS": "#F59E0B (amber)"
+      }
+    },
+
+    "row_interaction": {
+      "click": "Select row → load detail in SidePanel [D] (desktop) or open Modal (mobile)",
+      "selected_row_style": "bg-[#EFF6FF] border-l-3 border-[var(--color-primary)]",
+      "hover": "bg-[#F8FAFC]"
+    },
+
+    "sorting": {
+      "default": "occurredAt,desc (최신순)",
+      "server_side": true,
+      "sortable": ["occurredAt", "channel", "customerName", "agentName"]
+    },
+
+    "pagination": {
+      "component": "Pagination (재사용)",
+      "server_side": true,
+      "default_size": 20,
+      "size_options": [10, 20, 50],
+      "display": "총 {totalElements}건 | {page}/{totalPages} 페이지",
+      "performance_note": "3M+ 전체가 아닌 필터+기간 제한 결과. 기본 7일이면 수천~수만 건."
+    },
+
+    "empty_state": "'조건에 맞는 상담 내역이 없습니다'",
+
+    "improvement_vs_step1": [
+      "NEW: 테이블/타임라인 뷰 전환 토글",
+      "NEW: 타임라인 뷰 (채널별 색상 dot, 시간순 카드)",
+      "NEW: 키워드 하이라이트 (검색어 yellow 배경)",
+      "NEW: 고객명 클릭 → 고객 조회 페이지 연결",
+      "NEW: A/S 티켓 연결 뱃지 + 클릭 네비게이션",
+      "NEW: 당일 상담은 HH:mm만 표시 (간결)"
+    ]
+  },
+
+  "section5_detail_panel": {
+    "title": "E. 상담 상세 사이드 패널",
+
+    "component": "SidePanel (border-left-3 blue, slides from right on mobile as Modal)",
+    "trigger": "목록 행 클릭",
+    "api": "GET /api/consults/{id}",
+
+    "layout": {
+      "header": {
+        "content": "상담 상세",
+        "badge": "{channelBadge} · {occurredAt}",
+        "close_button": "X (desktop: collapse panel, mobile: close modal)"
+      },
+
+      "customer_section": {
+        "label": "고객",
+        "content": "{customerName} · {phone} {gradeBadge}",
+        "action": "Click customer name → navigate to /1?phone={phone}"
+      },
+
+      "agent_section": {
+        "label": "담당 / 통화시간",
+        "content": "{agentName} ({roleName}) · {durationFormatted}",
+        "duration_format": "durationSeconds → 'M분 S초' (예: '4분 12초')",
+        "show_duration": "channel === 'PHONE' only"
+      },
+
+      "content_section": {
+        "label": "내용",
+        "style": "bg-[#F8FAFC] border rounded-7 p-10 line-height-1.6",
+        "content": "ConsultLog.content (full text, multiline)",
+        "max_height": "300px with overflow-y-auto",
+        "keyword_highlight": "검색 키워드가 있으면 yellow 하이라이트"
+      },
+
+      "linked_ticket_section": {
+        "label": "관련 티켓",
+        "content": "{ticketNo badge} {statusLabel} · {assigneeName}",
+        "visible_if": "linkedTicketNo !== null",
+        "action": "Click → navigate to /tickets/{ticketId}"
+      },
+
+      "action_buttons": {
+        "layout": "flex-wrap gap-6 mt-12",
+        "buttons": [
+          {
+            "label": "+ A/S 접수",
+            "style": "btn-primary btn-sm",
+            "rbac": "AS_ENGINEER, TEAM_LEAD, ADMIN (Can component)",
+            "action": "Navigate to /tickets/new?phone={phone}&consultationId={id}",
+            "note": "상담에서 바로 A/S 접수. 고객+제품 정보 자동 채움."
+          },
+          {
+            "label": "📧 이메일",
+            "style": "btn-secondary btn-sm",
+            "rbac": "CS_CX, TEAM_LEAD, ADMIN",
+            "action": "Open email compose modal (recipient: customer email, context: consultation summary)"
+          },
+          {
+            "label": "📱 SMS",
+            "style": "btn-secondary btn-sm",
+            "rbac": "CS_CX, TEAM_LEAD, ADMIN",
+            "action": "Open SMS compose modal (recipient: customer phone)"
+          },
+          {
+            "label": "고객 페이지",
+            "style": "btn-secondary btn-sm",
+            "rbac": "ALL",
+            "action": "Navigate to /1?phone={phone}"
+          }
+        ]
+      }
+    },
+
+    "compose_modals": {
+      "email": {
+        "trigger": "[📧 이메일] button",
+        "component": "Modal (size='lg')",
+        "fields": [
+          { "field": "recipientEmail", "auto_fill": "customer.email", "editable": true },
+          { "field": "subject", "auto_fill": "'RE: 상담 관련 안내'", "editable": true },
+          { "field": "content", "type": "textarea", "auto_fill": "none (freeform)", "placeholder": "내용을 입력하세요" }
+        ],
+        "submit": "POST /api/messages/send { channel: 'EMAIL', ... }",
+        "on_success": "Toast '이메일 발송 완료' + MailLog 자동 기록 (CLAUDE.md 규칙)",
+        "ai_draft": "Phase 5: AI 초안 생성 버튼 (RESPONSE_DRAFT → pre-fill content)"
+      },
+      "sms": {
+        "trigger": "[📱 SMS] button",
+        "component": "Modal (size='sm')",
+        "fields": [
+          { "field": "recipientPhone", "auto_fill": "customer.phone", "editable": true },
+          { "field": "content", "type": "textarea", "max_length": 90, "counter": true }
+        ],
+        "submit": "POST /api/messages/send { channel: 'SMS', ... }",
+        "on_success": "Toast 'SMS 발송 완료' + MailLog 기록"
+      }
+    },
+
+    "improvement_vs_step1": [
+      "NEW: 인라인 사이드 패널 (페이지 이동 없이 상세 확인)",
+      "NEW: 통화시간 표시 ('4분 12초')",
+      "NEW: 키워드 하이라이트 in content",
+      "NEW: 4개 액션 버튼 (A/S접수, 이메일, SMS, 고객페이지)",
+      "NEW: 이메일/SMS 작성 모달 (즉시 발송, MailLog 자동)",
+      "NEW: 관련 티켓 뱃지 + 클릭 네비게이션",
+      "NEW: RBAC-gated 액션 (Can component)"
+    ]
+  },
+
+  "section6_cscx_workflow": {
+    "title": "F. CS/CX 전담 워크플로우",
+
+    "scenario1_incoming_call": {
+      "name": "전화 인입 → 고객 확인 → 상담 기록 → 후속 발송",
+      "steps": [
+        "1. CS/CX 담당자가 전화 수신",
+        "2. /2 (상담 내역 페이지) 진입 → keyword 필드에 고객 전화번호 입력",
+        "3. 자동 포커스된 검색창에 바로 타이핑 시작 (autoFocus)",
+        "4. Enter → API 호출 → 이전 상담 이력 목록 표시",
+        "5. 가장 최근 상담 행 클릭 → SidePanel에 이전 상담 내용 표시",
+        "6. 통화 종료 후 [+ 상담 기록] 버튼 클릭 → 새 상담 기록 추가",
+        "7. 필요 시 [📧 이메일] → 발송 모달 → 내용 작성 → 발송 → MailLog 기록"
+      ],
+      "target_time": "3초 이내 고객 컨텍스트 파악 (검색 → 이전 상담 확인)",
+      "accessibility": "autoFocus + Enter key + keyboard navigation (Tab between elements)"
+    },
+
+    "scenario2_proactive_followup": {
+      "name": "미응대 건 확인 → 후속 연락",
+      "steps": [
+        "1. '내 상담만' 체크박스 활성화 → 본인 담당 건만 필터",
+        "2. 기간 7일 → 미응대 건 식별 (linkedTicketNo null + 유형 'A/S문의')",
+        "3. 대상 건 클릭 → SidePanel에서 내용 확인",
+        "4. [📱 SMS] → 후속 안내 문자 발송",
+        "5. 필요 시 [+ A/S 접수] → 티켓 생성으로 이동"
+      ]
+    },
+
+    "scenario3_team_lead_monitoring": {
+      "name": "팀장이 팀 상담 현황 모니터링",
+      "steps": [
+        "1. 담당자 필터: '전체' (팀 전체 조회)",
+        "2. KPI 카드로 금일 상담량 + 채널별 분포 확인",
+        "3. 금일 A/S 연결 건수 확인 (asLinkedCount KPI)",
+        "4. 특정 담당자 필터 → 개인별 상담량 확인",
+        "5. 필요 시 Excel 다운로드 (header [📤 Excel] 버튼)"
+      ]
+    },
+
+    "keyboard_shortcuts": {
+      "Enter": "검색 실행",
+      "Escape": "SidePanel/Modal 닫기",
+      "ArrowUp/Down": "목록 행 선택 이동 (선택 행 → SidePanel 갱신)",
+      "Ctrl+E": "선택 건 이메일 발송 모달 열기",
+      "Ctrl+S": "선택 건 SMS 발송 모달 열기"
+    },
+
+    "accessibility_features": [
+      "autoFocus on keyword search (전화 중 즉시 타이핑)",
+      "Enter key for search submit",
+      "Arrow keys for list navigation",
+      "Ctrl shortcuts for frequent actions",
+      "Visible focus indicators on all interactive elements",
+      "aria-label on all buttons",
+      "Screen reader: '상담 42건 중 1페이지' 읽기"
+    ]
+  },
+
+  "section7_api_endpoints": {
+    "title": "G. API 엔드포인트",
+
+    "endpoints": [
+      {
+        "method": "GET", "path": "/api/consults",
+        "params": "keyword, channel, consultType, assignee, dateFrom, dateTo, page, size, sort",
+        "response": "PageResponse<ConsultationSummary>",
+        "rbac": "ALL (AS_ENGINEER: auto-filter assignee=self)"
+      },
+      {
+        "method": "GET", "path": "/api/consults/{id}",
+        "response": "ConsultationDetail (with full content)",
+        "rbac": "ALL"
+      },
+      {
+        "method": "GET", "path": "/api/consults/summary",
+        "params": "from, to",
+        "response": "{ todayTotal, phoneCount, kakaoCount, emailSmsCount, asLinkedCount }",
+        "rbac": "ALL"
+      },
+      {
+        "method": "POST", "path": "/api/consults",
+        "body": "{ customerPhone, channel, consultType, summary, content }",
+        "response": "ConsultationDetail",
+        "rbac": "CS_CX, TEAM_LEAD, ADMIN"
+      },
+      {
+        "method": "PATCH", "path": "/api/consults/{id}",
+        "body": "{ summary?, content? }",
+        "response": "ConsultationDetail",
+        "rbac": "ADMIN only"
+      },
+      {
+        "method": "DELETE", "path": "/api/consults/{id}",
+        "response": "204",
+        "rbac": "ADMIN only"
+      }
+    ]
+  },
+
+  "section8_improvements_summary": {
+    "title": "H. Step-1 대비 개선사항 총괄",
+
+    "from_to": {
+      "before": "10줄 placeholder (<h1> + <p> + <div class='placeholder-card'>)",
+      "after": "~350줄 full page (KPI + FilterBar + DataTable/Timeline toggle + SidePanel + compose modals)"
+    },
+
+    "new_features": [
+      "KPI 5종 카드 (금일 상담, 전화, 카카오, 이메일/SMS, A/S연결) + 30초 자동 갱신",
+      "통합 키워드 검색 (phone + name + content) + 검색어 결과 하이라이트",
+      "테이블/타임라인 뷰 전환 토글 (타임라인 = 채널별 색상 dot)",
+      "인라인 SidePanel (페이지 이동 없이 상세 확인)",
+      "이메일/SMS 작성 모달 (즉시 발송 + MailLog 자동 기록)",
+      "역할별 필터 분기 (AS_ENGINEER: 본인 고정, CS_CX: '내 상담만' 토글)",
+      "A/S 접수 CTA (상담 → 티켓 생성 원클릭 이동)",
+      "고객명 클릭 → 고객 조회 페이지 네비게이션",
+      "관련 티켓 뱃지 + 클릭 → 티켓 상세 네비게이션",
+      "키보드 단축키 (Enter, Escape, Arrows, Ctrl+E/S)",
+      "상담 유형 필터 5종 (제품문의/A/S/배송/교환반품/기타)",
+      "담당자 필터 (동적 목록, 역할별 제한)",
+      "상담 기록 추가 기능 (CS/CX, TEAM_LEAD, ADMIN)",
+      "반응형 (520px): KPI 2열, 테이블→카드, SidePanel→Modal"
+    ],
+
+    "component_count": {
+      "before": 1,
+      "after": 10,
+      "list": [
+        "ConsultationPage (page container + view toggle)",
+        "ConsultKpiRow (5 KPI cards)",
+        "ConsultFilterBar (FilterBar + channel/type/agent/date)",
+        "ConsultTable (DataTable view)",
+        "ConsultTimeline (Timeline view)",
+        "ConsultDetailPanel (SidePanel with actions)",
+        "ConsultCreateModal (new consultation record)",
+        "EmailComposeModal (email send)",
+        "SmsComposeModal (SMS send)",
+        "ExcelExportButton (header action)"
+      ]
+    }
+  }
+}
