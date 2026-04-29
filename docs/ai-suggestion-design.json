@@ -1,0 +1,528 @@
+{
+  "meta": {
+    "document": "AI Suggestion Feature Design (Claude API Integration)",
+    "phase": "Phase 5 (ROADMAP.md)",
+    "createdAt": "2026-04-29",
+    "core_rule": "LLM 자동 답변은 suggestion 형태만. 자동 발송 절대 금지. (CLAUDE.md 도메인 규칙)",
+    "network": "로컬 Claude API, Tailscale VPN 경유 (CLAUDE.md 아키텍처)"
+  },
+
+  "section1_api_architecture": {
+    "title": "(1) Claude API 호출 구조 및 인증 방식",
+
+    "network_topology": {
+      "diagram": [
+        "React (Renderer)                                          ",
+        "  |                                                       ",
+        "  | POST /api/ai/suggestion                               ",
+        "  v                                                       ",
+        "Spring Boot API Server (admin.tbnws.com)                  ",
+        "  |                                                       ",
+        "  | 1. PII masking (name -> 성만, phone -> 끝4자리)       ",
+        "  | 2. Prompt construction (system + context + user query) ",
+        "  | 3. POST https://claude-local.tailnet:8443/v1/messages ",
+        "  |    Authorization: x-api-key {CLAUDE_API_KEY}          ",
+        "  |    (Tailscale VPN internal network)                   ",
+        "  |                                                       ",
+        "  v                                                       ",
+        "Local Claude API Server (Tailscale VPN)                   ",
+        "  |                                                       ",
+        "  | Claude response (streaming or complete)               ",
+        "  v                                                       ",
+        "Spring Boot                                               ",
+        "  |                                                       ",
+        "  | 4. Save to as_ai_logs table                           ",
+        "  | 5. Return suggestion to frontend                      ",
+        "  v                                                       ",
+        "React (display in AiSuggestionPanel)"
+      ],
+      "key_principle": "Frontend NEVER calls Claude API directly. All LLM calls go through Spring Boot for PII masking, logging, and rate control."
+    },
+
+    "authentication": {
+      "frontend_to_spring": {
+        "method": "JWT Bearer token (same as all other API calls)",
+        "header": "Authorization: Bearer {accessToken}",
+        "note": "No special auth for AI endpoints. Uses existing auth system."
+      },
+      "spring_to_claude": {
+        "method": "Anthropic API Key",
+        "header": "x-api-key: {CLAUDE_API_KEY}",
+        "additional_headers": {
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json"
+        },
+        "key_storage": "Spring application.yml (encrypted) or environment variable CLAUDE_API_KEY. Never exposed to frontend.",
+        "endpoint": "https://claude-local.tailnet:8443/v1/messages",
+        "note": "Internal Tailscale IP. Not accessible from public internet."
+      }
+    },
+
+    "spring_proxy_design": {
+      "controller": "AiSuggestionController",
+      "service": "AiSuggestionService",
+      "client": "ClaudeApiClient (RestTemplate or WebClient)",
+
+      "request_flow": [
+        "1. Frontend sends: POST /api/ai/suggestion { type, ticketId, query, params }",
+        "2. Controller validates auth + RBAC (AS_ENGINEER, TEAM_LEAD, ADMIN)",
+        "3. Service loads ticket context from DB (symptom, product, customer history)",
+        "4. Service masks PII: customer name -> '김*', phone -> '****5678'",
+        "5. Service builds Claude prompt: system_prompt + context + user_query",
+        "6. ClaudeApiClient calls local Claude API via Tailscale VPN",
+        "7. Service parses Claude response",
+        "8. Service saves to as_ai_logs (suggestion_id, input, output, model, tokens)",
+        "9. Service returns AiSuggestion to frontend",
+        "10. Frontend displays in AiSuggestionPanel (read-only, no auto-send)"
+      ],
+
+      "pii_masking_rules": {
+        "customer_name": "Keep surname only + '*' (e.g., '김민수' -> '김**')",
+        "phone": "Mask all except last 4 digits (e.g., '010-1234-5678' -> '***-****-5678')",
+        "email": "Mask local part (e.g., 'minsu@email.com' -> 'm****@email.com')",
+        "address": "Omit entirely (not needed for diagnosis)",
+        "serial_number": "Keep full (needed for product identification)"
+      },
+
+      "rate_limiting": {
+        "per_user": "30 requests/hour",
+        "per_ticket": "10 requests/hour",
+        "global": "500 requests/hour",
+        "implementation": "Spring @RateLimiter or Redis token bucket"
+      },
+
+      "error_handling": {
+        "claude_timeout": "15 seconds timeout. Return 504 with message '분석 시간이 초과되었습니다. 다시 시도해 주세요.'",
+        "claude_unavailable": "Return 503 with message 'AI 서비스에 연결할 수 없습니다. Tailscale VPN 상태를 확인해 주세요.'",
+        "claude_rate_limit": "Return 429 with message '요청 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.'",
+        "invalid_response": "Log raw response, return 502 with message '분석 결과를 처리할 수 없습니다.'"
+      }
+    },
+
+    "suggestion_types": {
+      "SYMPTOM_ANALYSIS": {
+        "description": "Product model + symptom -> ranked probable causes + recommended action",
+        "input": "{ productModel, symptom, serialNumber? }",
+        "system_prompt": "You are an A/S diagnostic assistant for consumer electronics. Given a product model and customer-reported symptom, analyze the probable causes ranked by likelihood. For each cause, suggest the repair action. Base your analysis on common failure patterns for this product line. Respond in Korean.",
+        "context_injected": "Similar past tickets (top 5 by symptom similarity from DB), product warranty status",
+        "output_format": {
+          "causes": [
+            { "rank": 1, "cause": "좌측 드라이버 유닛 단선", "probability": 76, "action": "부품 교체 수리", "avgDays": 2.8 }
+          ],
+          "recommendation": "수리 (드라이버 유닛 교체)",
+          "rationale": "보증 기간 내(331일 남음), 과거 동일 증상 70%가 수리로 해결"
+        }
+      },
+      "RESPONSE_DRAFT": {
+        "description": "Generate customer-facing message draft based on ticket context",
+        "input": "{ ticketId, channel: 'EMAIL'|'SMS'|'ALIMTALK', tone: 'POLITE'|'FORMAL'|'FRIENDLY' }",
+        "system_prompt": "You are a customer service writer for an electronics A/S center. Draft a message to the customer based on the ticket status and actions taken. Match the requested tone and channel format. Never include internal notes or cost details. Respond in Korean.",
+        "context_injected": "Ticket status, diagnosis, recent events, customer name (masked)",
+        "output_format": {
+          "subject": "A/S 접수 안내 (AS-2641)",
+          "body": "안녕하세요 김** 고객님. WE-300 좌측 이어폰 무음 증상 관련하여...",
+          "channel": "EMAIL",
+          "tone": "POLITE"
+        }
+      },
+      "SIMILAR_CASES": {
+        "description": "Semantic search for similar past tickets",
+        "input": "{ query: 'free text describing symptom or situation' }",
+        "system_prompt": "Given the search query, find the most relevant past A/S cases from the provided case list. Rank by relevance and explain why each case is similar. Respond in Korean.",
+        "context_injected": "Top 20 candidate tickets from DB (pre-filtered by product model)",
+        "output_format": {
+          "cases": [
+            { "ticketNo": "AS-2218", "similarity": 98, "resolutionSummary": "드라이버 교체 (수리)", "daysToResolve": 2.5 }
+          ]
+        }
+      },
+      "CUSTOMER_BRIEFING": {
+        "description": "One-paragraph summary of customer's full history before a phone call",
+        "input": "{ customerPhone }",
+        "system_prompt": "Summarize this customer's history in one concise paragraph for an agent about to take their call. Include: purchase count, A/S history, current open tickets, communication preference, satisfaction level. Respond in Korean.",
+        "context_injected": "Customer profile, purchase history (last 5), A/S tickets (all), consultation logs (last 10)",
+        "output_format": {
+          "summary": "김** (VIP, 가입 1년 8개월) 고객은 총 5회 구매 중 3건 A/S 이력...",
+          "highlights": ["현재 진행 중 1건(AS-2641)", "보증 기간 내", "커뮤니케이션 응답성 좋음"]
+        }
+      }
+    }
+  },
+
+  "section2_db_schema": {
+    "title": "(2) AILog Table Schema",
+
+    "table": {
+      "name": "as_ai_logs",
+      "description": "Every Claude API call is logged here. Immutable (INSERT only). Used for usage analytics, adoption tracking, and audit.",
+      "ddl": [
+        "CREATE TABLE as_ai_logs (",
+        "  suggestion_id     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+        "  ticket_id         BIGINT UNSIGNED NULL COMMENT 'FK to as_tickets. NULL for CUSTOMER_BRIEFING (phone-based, not ticket-based)',",
+        "  suggestion_type   ENUM('SYMPTOM_ANALYSIS','RESPONSE_DRAFT','SIMILAR_CASES','CUSTOMER_BRIEFING') NOT NULL,",
+        "  requested_by      BIGINT UNSIGNED NOT NULL COMMENT 'FK to users (who clicked the AI button)',",
+        "  requested_by_name VARCHAR(50) NOT NULL,",
+        "  requested_by_role VARCHAR(20) NOT NULL,",
+        "",
+        "  -- Input (what was sent to Claude, AFTER PII masking)",
+        "  input_params      JSON NOT NULL COMMENT 'Masked input parameters sent to Claude',",
+        "  system_prompt_hash VARCHAR(64) NOT NULL COMMENT 'SHA-256 of system prompt used (for version tracking)',",
+        "",
+        "  -- Output (what Claude returned)",
+        "  output_content    JSON NOT NULL COMMENT 'Parsed structured response from Claude',",
+        "  raw_response      TEXT NULL COMMENT 'Raw Claude API response body (for debugging, can be purged after 90 days)',",
+        "",
+        "  -- Model & usage",
+        "  model_id          VARCHAR(50) NOT NULL DEFAULT 'claude-sonnet-4-20250514' COMMENT 'Claude model used',",
+        "  input_tokens      INT UNSIGNED NOT NULL DEFAULT 0,",
+        "  output_tokens     INT UNSIGNED NOT NULL DEFAULT 0,",
+        "  latency_ms        INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Round-trip time to Claude API',",
+        "",
+        "  -- Adoption tracking",
+        "  adopted           BOOLEAN NULL COMMENT 'NULL=not yet decided, TRUE=adopted, FALSE=dismissed',",
+        "  adopted_at        DATETIME NULL,",
+        "  adopted_action    VARCHAR(100) NULL COMMENT 'What action was taken with this suggestion (e.g., used_as_email, applied_diagnosis)',",
+        "  edited_before_use BOOLEAN NULL COMMENT 'TRUE if user edited the suggestion before using it',",
+        "",
+        "  -- Timestamps",
+        "  created_at        DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),",
+        "",
+        "  -- Indexes",
+        "  INDEX idx_ailog_ticket (ticket_id, created_at),",
+        "  INDEX idx_ailog_type (suggestion_type, created_at),",
+        "  INDEX idx_ailog_user (requested_by, created_at),",
+        "  INDEX idx_ailog_adopted (adopted, suggestion_type),",
+        "",
+        "  -- Foreign keys",
+        "  CONSTRAINT fk_ailog_ticket FOREIGN KEY (ticket_id) REFERENCES as_tickets(ticket_id),",
+        "  CONSTRAINT fk_ailog_user FOREIGN KEY (requested_by) REFERENCES users(id)",
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+      ]
+    },
+
+    "column_details": {
+      "suggestion_id": "Auto-increment PK. Referenced by TicketEvent(LLM_SUGGESTION_VIEWED).payload.suggestionId",
+      "ticket_id": "NULL when type=CUSTOMER_BRIEFING (phone lookup, not ticket-scoped). Non-null for all other types.",
+      "input_params": "JSON with PII already masked. Example: {\"productModel\":\"WE-300\",\"symptom\":\"좌측 무음\",\"customerName\":\"김**\"}",
+      "system_prompt_hash": "SHA-256 hash to track prompt versioning without storing full prompt text in every row",
+      "output_content": "Structured JSON matching the output_format for each suggestion_type. Parsed from Claude response.",
+      "raw_response": "Full Claude API response body. For debugging. Purgeable after 90 days to save storage.",
+      "adopted": "Tri-state: NULL (user saw it but hasn't acted), TRUE (used it), FALSE (dismissed). Updated via PATCH.",
+      "adopted_action": "Describes HOW the suggestion was used. Values: 'applied_diagnosis', 'used_as_email', 'used_as_sms', 'copied_to_memo', 'partial_use'",
+      "edited_before_use": "TRUE if user clicked 'Edit' before 'Use'. Measures how much users trust raw AI output."
+    },
+
+    "companion_event": {
+      "event_type": "LLM_SUGGESTION_VIEWED",
+      "table": "as_ticket_events",
+      "trigger": "When AiSuggestionPanel is expanded or suggestion result is displayed",
+      "payload": "{ suggestionId: number, accepted: boolean | null }",
+      "debounce": "1 per suggestion per session (don't log multiple views of same suggestion)",
+      "note": "This event links ticket timeline to AI usage. The as_ai_logs table stores the full detail; the event is a lightweight pointer."
+    },
+
+    "analytics_queries": {
+      "adoption_rate": "SELECT suggestion_type, COUNT(*) AS total, SUM(adopted=TRUE) AS adopted, ROUND(SUM(adopted=TRUE)/COUNT(*)*100,1) AS rate FROM as_ai_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY suggestion_type",
+      "avg_latency": "SELECT suggestion_type, ROUND(AVG(latency_ms)) AS avg_ms FROM as_ai_logs GROUP BY suggestion_type",
+      "edit_rate": "SELECT suggestion_type, ROUND(SUM(edited_before_use=TRUE)/SUM(adopted=TRUE)*100,1) AS edit_rate FROM as_ai_logs WHERE adopted=TRUE GROUP BY suggestion_type",
+      "per_user_usage": "SELECT requested_by_name, COUNT(*) AS calls, SUM(adopted=TRUE) AS adopted FROM as_ai_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) GROUP BY requested_by"
+    }
+  },
+
+  "section3_frontend_ui": {
+    "title": "(3) Frontend Suggestion UI Flow",
+
+    "entry_points": {
+      "ticket_detail_page": {
+        "location": "Right sidebar panel on /tickets/:id (step 3 diagnosis)",
+        "component": "AiSuggestionPanel (collapsible)",
+        "trigger": "Panel expand or explicit 'AI 분석' button click",
+        "available_types": ["SYMPTOM_ANALYSIS", "RESPONSE_DRAFT", "SIMILAR_CASES"]
+      },
+      "ai_support_page": {
+        "location": "Dedicated page /ai",
+        "component": "AiSupportPage (4 cards, each for one suggestion type)",
+        "trigger": "Click 'Start Analysis' button on each card",
+        "available_types": ["SYMPTOM_ANALYSIS", "RESPONSE_DRAFT", "SIMILAR_CASES", "CUSTOMER_BRIEFING"]
+      },
+      "customer_page": {
+        "location": "Customer profile area on /1",
+        "component": "Inline 'AI 요약' button",
+        "trigger": "Click button next to customer name",
+        "available_types": ["CUSTOMER_BRIEFING"]
+      }
+    },
+
+    "components": {
+      "AiSuggestionPanel": {
+        "description": "Collapsible right-side panel on ticket detail page",
+        "location": "Below DiagnosisCard in TicketDetailPage right column",
+        "design": {
+          "collapsed": "Gradient border card with title '🤖 AI 의사결정 서포트' + 'Claude · 권고 (자동 발송 X)' badge",
+          "expanded": "Shows suggestion type tabs + results + action buttons",
+          "background": "linear-gradient(135deg, #F5F3FF, #FFF) with border-color #DDD6FE"
+        },
+        "sub_components": [
+          "SuggestionTypeTabs (SYMPTOM_ANALYSIS | RESPONSE_DRAFT | SIMILAR_CASES)",
+          "SymptomAnalysisResult",
+          "ResponseDraftResult",
+          "SimilarCasesResult",
+          "SuggestionActionBar"
+        ]
+      },
+
+      "SymptomAnalysisResult": {
+        "display": [
+          "Ranked cause list (rank, cause, probability %, action, avgDays)",
+          "Probability bar chart (horizontal, colored by rank)",
+          "Recommendation card (bold, with rationale)",
+          "Note box: '⚠ AI 추천은 참고용. 최종 결정은 담당자가 합니다.'"
+        ],
+        "actions": [
+          { "label": "추천 적용", "style": "btn-primary gradient", "behavior": "Set diagnosisResult + resolutionPlan from AI recommendation. Mark adopted=TRUE, adopted_action='applied_diagnosis'" },
+          { "label": "다시 분석", "style": "btn-secondary", "behavior": "Re-call API with same inputs. New suggestion_id." }
+        ]
+      },
+
+      "ResponseDraftResult": {
+        "display": [
+          "Draft text in styled card (background #F8FAFC, 12px, line-height 1.6)",
+          "Channel badge (EMAIL/SMS/ALIMTALK)",
+          "Tone badge (공손체/사무체/친근체)"
+        ],
+        "actions": [
+          { "label": "📧 이메일로 사용", "style": "btn-secondary", "behavior": "Open email compose modal with draft pre-filled. Mark adopted_action='used_as_email'" },
+          { "label": "📱 SMS로 사용", "style": "btn-secondary", "behavior": "Open SMS compose with draft. Mark adopted_action='used_as_sms'" },
+          { "label": "✏ 편집", "style": "btn-secondary", "behavior": "Open editable textarea. On save, mark edited_before_use=TRUE" },
+          { "label": "🔄 다시 생성", "style": "btn-secondary", "behavior": "Re-call API" }
+        ],
+        "safety_banner": "⚠ 자동 발송 절대 금지. 반드시 내용 검토 후 수동 발송하세요."
+      },
+
+      "SimilarCasesResult": {
+        "display": [
+          "Table: ticketNo, similarity %, resolution summary, days to resolve",
+          "Each row clickable -> navigate to /tickets/:id",
+          "Similarity badge: >=90% violet, 80-89% blue, <80% slate"
+        ],
+        "actions": [
+          { "label": "상세 보기", "style": "btn-secondary btn-sm", "behavior": "Navigate to selected ticket detail page" }
+        ]
+      },
+
+      "SuggestionActionBar": {
+        "description": "Bottom bar of AiSuggestionPanel, always visible when suggestion is displayed",
+        "elements": [
+          { "element": "adopted_feedback", "type": "2-button group", "buttons": ["👍 도움됨", "👎 도움 안됨"], "behavior": "PATCH /api/ai/suggestions/{id}/feedback { adopted: true/false }" },
+          { "element": "metadata", "type": "text", "format": "Claude · {latency_ms}ms · {input_tokens+output_tokens} tokens" }
+        ]
+      }
+    },
+
+    "ui_flow_scenarios": [
+      {
+        "id": "SC-AI-1",
+        "title": "A/S 담당자 증상 분석 요청 (티켓 상세에서)",
+        "steps": [
+          "1. 박수리 -> /tickets/AS-2641 (step 3 진단 활성)",
+          "2. 우측 AiSuggestionPanel 펼침 클릭",
+          "3. '증상 분석' 탭 활성 (기본)",
+          "4. 제품 모델(WE-300) + 증상('좌측 무음') 자동 채움됨 (티켓 데이터)",
+          "5. [🤖 분석 시작] 클릭",
+          "6. POST /api/ai/suggestion { type:'SYMPTOM_ANALYSIS', ticketId:2641 }",
+          "7. Loading spinner (1.4초 평균)",
+          "8. 결과 표시: 1순위 '드라이버 단선' 76%, 2순위 '배선 접촉불량' 14%, 3순위 '펌웨어 오류' 10%",
+          "9. 추천: '수리 (드라이버 유닛 교체)' 카드 표시",
+          "10. 박수리: [추천 적용] 클릭",
+          "11. -> diagnosisResult 필드에 'AI 분석: 드라이버 유닛 단선 (76%)' 자동 입력",
+          "12. -> resolutionPlan 드롭다운 '수리(부품 교체)' 자동 선택",
+          "13. -> PATCH /api/ai/suggestions/{id}/feedback { adopted:true, adoptedAction:'applied_diagnosis' }",
+          "14. -> as_ai_logs.adopted = TRUE, adopted_at = NOW()",
+          "15. -> as_ticket_events INSERT: LLM_SUGGESTION_VIEWED { suggestionId, accepted:true }"
+        ]
+      },
+      {
+        "id": "SC-AI-2",
+        "title": "답변 초안 생성 -> 편집 후 이메일 발송",
+        "steps": [
+          "1. 박수리 -> AiSuggestionPanel -> '답변 초안' 탭",
+          "2. 채널: 이메일, 어조: 공손체 선택",
+          "3. [✏ 초안 생성] 클릭",
+          "4. POST /api/ai/suggestion { type:'RESPONSE_DRAFT', ticketId:2641, params:{channel:'EMAIL', tone:'POLITE'} }",
+          "5. 초안 표시: '안녕하세요 김** 고객님...'",
+          "6. 박수리: [✏ 편집] 클릭 -> textarea 활성화",
+          "7. 일부 문구 수정 후 [📧 이메일로 사용] 클릭",
+          "8. -> 이메일 발송 모달 열림 (수신자: 고객 이메일, 내용: 편집된 초안)",
+          "9. -> PATCH /api/ai/suggestions/{id}/feedback { adopted:true, adoptedAction:'used_as_email', editedBeforeUse:true }",
+          "10. -> 이메일 발송: POST /api/mail-logs/email (별도 플로우)",
+          "11. -> MailLog 기록 + EMAIL_SENT 이벤트 + (첫 응답이면) FIRST_RESPONSE 이벤트"
+        ]
+      },
+      {
+        "id": "SC-AI-3",
+        "title": "고객 브리핑 (전화 전 요약)",
+        "steps": [
+          "1. 이수진 (CS/CX) -> /1 (고객 조회) -> 010-1234-5678 검색",
+          "2. 고객 프로필 카드 표시됨",
+          "3. [🤖 AI 요약] 버튼 클릭",
+          "4. POST /api/ai/suggestion { type:'CUSTOMER_BRIEFING', params:{customerPhone:'010-1234-5678'} }",
+          "5. 요약 카드 표시: '김** (VIP, 가입 1년 8개월) 고객은...'",
+          "6. 하이라이트 태그: '현재 진행 중 1건', '보증 기간 내', '응답성 좋음'",
+          "7. 이수진: 전화 통화 시 참고",
+          "8. -> as_ai_logs INSERT (ticket_id=NULL, type=CUSTOMER_BRIEFING)"
+        ]
+      },
+      {
+        "id": "SC-AI-4",
+        "title": "AI 서포트 전용 페이지 사용",
+        "steps": [
+          "1. 김기술 -> /ai (AI 의사결정 서포트 페이지)",
+          "2. KPI 확인: 금일 호출 142, 채택률 78%, 평균 응답 1.4초, 학습 케이스 40,213",
+          "3. '제품 증상 분석' 카드에서 제품 선택 + 증상 직접 입력",
+          "4. [🤖 분석 시작] 클릭 -> POST /api/ai/suggestion { type:'SYMPTOM_ANALYSIS', params:{...} }",
+          "5. 결과 표시 (독립 분석, 특정 티켓 연결 없음)",
+          "6. 하단 호출 이력 테이블에 새 행 추가: 시각, 유형, 대상, 호출자, 채택 여부"
+        ]
+      }
+    ],
+
+    "adoption_tracking_ui": {
+      "feedback_buttons": {
+        "location": "Bottom of every suggestion result",
+        "options": [
+          { "label": "👍 도움됨", "value": true, "style": "bg-green-50 border-green-200 text-green-700 hover:bg-green-100" },
+          { "label": "👎 도움 안됨", "value": false, "style": "bg-red-50 border-red-200 text-red-700 hover:bg-red-100" }
+        ],
+        "api": "PATCH /api/ai/suggestions/{suggestionId}/feedback",
+        "body_adopted": "{ adopted: true, adoptedAction: 'applied_diagnosis' }",
+        "body_dismissed": "{ adopted: false }",
+        "note": "Optional. User can close panel without clicking either button (adopted stays NULL)."
+      },
+
+      "auto_adoption_detection": {
+        "description": "In some cases, adoption is detected automatically without explicit button click",
+        "rules": [
+          { "trigger": "User clicks '추천 적용' on SymptomAnalysis", "auto_set": "adopted=TRUE, adoptedAction='applied_diagnosis'" },
+          { "trigger": "User clicks '📧 이메일로 사용' on ResponseDraft", "auto_set": "adopted=TRUE, adoptedAction='used_as_email'" },
+          { "trigger": "User clicks '📱 SMS로 사용' on ResponseDraft", "auto_set": "adopted=TRUE, adoptedAction='used_as_sms'" },
+          { "trigger": "User clicks '편집' then uses content", "auto_set": "adopted=TRUE, editedBeforeUse=TRUE" }
+        ]
+      },
+
+      "ai_kpi_dashboard": {
+        "location": "/ai page top section",
+        "cards": [
+          { "label": "금일 호출", "api_field": "todayCalls", "color": "violet" },
+          { "label": "담당자 채택률", "api_field": "adoptionRate", "format": "{rate}%", "color": "green" },
+          { "label": "평균 응답", "api_field": "avgLatencyMs", "format": "{ms}ms -> {seconds}초", "color": "blue" },
+          { "label": "학습 케이스", "api_field": "totalCasesAnalyzed", "color": "default" }
+        ],
+        "api": "GET /api/ai/stats"
+      },
+
+      "history_table": {
+        "location": "/ai page bottom section",
+        "api": "GET /api/ai/logs?page=0&size=20",
+        "columns": [
+          { "key": "createdAt", "label": "시각", "format": "HH:mm" },
+          { "key": "suggestionType", "label": "유형", "type": "badge" },
+          { "key": "target", "label": "대상", "format": "ticketNo or phone" },
+          { "key": "requestedByName", "label": "호출자" },
+          { "key": "adopted", "label": "채택", "type": "badge", "values": { "true": "채택 (green)", "false": "미채택 (amber)", "null": "조회만 (slate)" } },
+          { "key": "action", "label": "", "type": "button", "text": "상세" }
+        ]
+      }
+    },
+
+    "safety_guardrails": {
+      "ui_level": [
+        "All suggestion results display: '⚠ AI 추천은 참고용. 최종 결정은 담당자가 합니다. 자동 발송 절대 금지.'",
+        "Response drafts have separate safety banner: '⚠ 자동 발송 절대 금지. 반드시 내용 검토 후 수동 발송하세요.'",
+        "There is NO 'send directly' button. Only 'use as email/SMS' which opens compose modal for review.",
+        "AiSuggestionPanel badge always shows '권고 (자동 발송 X)'"
+      ],
+      "backend_level": [
+        "Claude API is never called from frontend directly",
+        "PII is masked before sending to Claude",
+        "All calls logged to as_ai_logs (audit trail)",
+        "Rate limiting prevents abuse",
+        "No auto-trigger: AI is only called when user explicitly clicks a button"
+      ],
+      "policy_display": {
+        "location": "/ai page '🛡 사용 정책' section",
+        "rules": [
+          "모든 출력은 suggestion — 시스템이 직접 발송하지 않음",
+          "고객 PII는 마스킹 후 전송 (이름은 성만, 전화는 끝 4자리)",
+          "로컬 Claude API 사용, 외부 인터넷으로 전송 없음 (Tailscale VPN)",
+          "호출 이력 전수 기록 — 누가 언제 무엇을 받았고 채택했는지 감사 가능",
+          "가격 결정 / 보상 결정 등 비용 관련 자동화 금지",
+          "고객 클레임 대응 자동 발송 금지"
+        ]
+      }
+    }
+  },
+
+  "api_endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/ai/suggestion",
+      "description": "Request AI suggestion from Claude",
+      "auth": "AS_ENGINEER, TEAM_LEAD, ADMIN",
+      "request": {
+        "type": "SYMPTOM_ANALYSIS | RESPONSE_DRAFT | SIMILAR_CASES | CUSTOMER_BRIEFING",
+        "ticketId": "number (optional for CUSTOMER_BRIEFING)",
+        "params": "object (type-specific parameters)"
+      },
+      "response_200": {
+        "suggestionId": 1001,
+        "type": "SYMPTOM_ANALYSIS",
+        "content": { "causes": [], "recommendation": "...", "rationale": "..." },
+        "modelId": "claude-sonnet-4-20250514",
+        "latencyMs": 1420,
+        "inputTokens": 850,
+        "outputTokens": 320,
+        "createdAt": "2026-04-29T14:22:00.000Z"
+      },
+      "response_429": { "code": "RATE_LIMIT_EXCEEDED", "message": "요청 한도 초과" },
+      "response_503": { "code": "AI_SERVICE_UNAVAILABLE", "message": "AI 서비스 연결 불가" }
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/ai/suggestions/{suggestionId}/feedback",
+      "description": "Record adoption/dismissal of a suggestion",
+      "auth": "ALL (logged-in users)",
+      "request": {
+        "adopted": "boolean",
+        "adoptedAction": "string (optional, e.g., 'applied_diagnosis', 'used_as_email')",
+        "editedBeforeUse": "boolean (optional)"
+      },
+      "response_200": { "suggestionId": 1001, "adopted": true, "adoptedAt": "2026-04-29T14:23:00.000Z" }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/stats",
+      "description": "AI usage KPI statistics",
+      "auth": "TEAM_LEAD, ADMIN",
+      "response_200": {
+        "todayCalls": 142,
+        "adoptionRate": 78.3,
+        "avgLatencyMs": 1420,
+        "totalCasesAnalyzed": 40213,
+        "byType": {
+          "SYMPTOM_ANALYSIS": { "calls": 68, "adoptionRate": 82 },
+          "RESPONSE_DRAFT": { "calls": 45, "adoptionRate": 76 },
+          "SIMILAR_CASES": { "calls": 22, "adoptionRate": 71 },
+          "CUSTOMER_BRIEFING": { "calls": 7, "adoptionRate": 85 }
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/ai/logs",
+      "description": "Paginated AI call history",
+      "auth": "TEAM_LEAD, ADMIN",
+      "params": "page, size, type?, requestedBy?, adopted?, from?, to?",
+      "response_200": "PageResponse<AiLogSummary>"
+    }
+  ]
+}
