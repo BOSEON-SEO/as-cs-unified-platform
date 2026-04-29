@@ -1,0 +1,351 @@
+{
+  "meta": {
+    "document": "Architecture Review & Approval Report",
+    "createdAt": "2026-04-29",
+    "reviewed": "Step 2~5 design deliverables (19 docs, 440KB)",
+    "codebase": "29 source files, 3 runtime deps, all pages placeholder",
+    "verdict": "CONDITIONALLY APPROVED — 5 blockers must be resolved before Sprint 0 start"
+  },
+
+  "section1_feasibility": {
+    "title": "(1) Technical Feasibility & Complexity Assessment",
+    "grade": "B+",
+
+    "stack_assessment": {
+      "react_19": { "feasibility": "HIGH", "risk": "LOW", "note": "Stable release. All planned libraries (zustand 5, react-query 5, react-router 7) officially support React 19." },
+      "typescript_6": { "feasibility": "HIGH", "risk": "MEDIUM", "note": "Very new (released 2026). verbatimModuleSyntax + erasableSyntaxOnly enforce strict patterns. Some 3rd-party types may lag. skipLibCheck: true mitigates." },
+      "vite_8": { "feasibility": "HIGH", "risk": "LOW", "note": "Proven bundler. @tailwindcss/vite plugin handles Tailwind v4 integration." },
+      "electron_41": { "feasibility": "HIGH", "risk": "MEDIUM", "note": "Chromium 132+. contextIsolation + sandbox already configured correctly. safeStorage IPC not yet implemented." },
+      "tailwind_4": { "feasibility": "HIGH", "risk": "LOW", "note": "@custom-variant desktop already working for 520px breakpoint. Design tokens in CSS variables." }
+    },
+
+    "complexity_by_feature": [
+      { "feature": "Auth (JWT + zustand persist)", "complexity": "MEDIUM", "hours": 8, "risk": "localStorage persist vs Electron safeStorage 분기" },
+      { "feature": "API Client (axios interceptor)", "complexity": "MEDIUM", "hours": 4, "risk": "401 → refresh → retry chain 정확성" },
+      { "feature": "Customer Page (5 tabs)", "complexity": "HIGH", "hours": 16, "risk": "5개 탭 lazy-loading + 3M row 상담이력 성능" },
+      { "feature": "Ticket CRUD + Stepper", "complexity": "VERY HIGH", "hours": 26, "risk": "8 statuses × 12 transitions × 4 roles 조합 + 6단계 스텝퍼 UI" },
+      { "feature": "Cost 3-Axis + Approval", "complexity": "MEDIUM", "hours": 14, "risk": "axis→category 교차 검증 + 승인 워크플로" },
+      { "feature": "Assignment Auto/Manual", "complexity": "HIGH", "hours": 16, "risk": "라운드로빈 동시성 + DnD 라이브러리" },
+      { "feature": "Shipment + Recall", "complexity": "MEDIUM", "hours": 12, "risk": "2개 상태 머신 + 택배 추적 URL" },
+      { "feature": "MailLog + AI + Stats", "complexity": "HIGH", "hours": 22, "risk": "3채널 어댑터 + Tailscale VPN + 대시보드 캐싱" },
+      { "feature": "Bidirectional Navigation", "complexity": "MEDIUM", "hours": 6, "risk": "dynamic route breadcrumb + scroll restoration" }
+    ],
+
+    "total_estimated_hours": 124,
+    "note": "코드 구현만의 시간. Spring 백엔드 제외. 설계 문서의 292h는 백엔드 포함."
+  },
+
+  "section2_platform_issues": {
+    "title": "(2) React + Electron + Spring API Potential Issues",
+
+    "issues": [
+      {
+        "id": "PI-1",
+        "severity": "HIGH",
+        "area": "Electron file:// + React Router",
+        "problem": "Electron prod mode loads dist/index.html via file:// protocol. react-router v7 createBrowserRouter uses History API pushState which requires HTTP protocol. file:// does NOT support pushState.",
+        "impact": "In Electron prod build, URL navigation (/tickets/2641, /1?phone=...) will FAIL. Direct URL entry or page refresh returns blank page.",
+        "solution": {
+          "option_a": "Switch to createHashRouter (#/tickets/2641). Works with file://. Downside: ugly URLs with #.",
+          "option_b": "Keep createBrowserRouter. In Electron prod, use custom protocol (app://) with Electron's protocol.handle. Transparent to React Router.",
+          "option_c": "In Electron prod, use loadURL('http://localhost:PORT') even in prod (embedded HTTP server). Adds complexity.",
+          "recommended": "Option A (createHashRouter) for simplicity. 12 internal users won't care about # in URLs. Or: detect Electron (window.electronAPI) and conditionally use hash router.",
+          "code_hint": "const router = window.electronAPI ? createHashRouter(routes) : createBrowserRouter(routes);"
+        }
+      },
+      {
+        "id": "PI-2",
+        "severity": "HIGH",
+        "area": "CORS: Electron → Spring API",
+        "problem": "Electron renderer loads from file:// (or app://). API calls to https://admin.tbnws.com/api have different origin. CORS preflight OPTIONS will fail unless Spring explicitly allows Electron's origin.",
+        "impact": "All API calls blocked in Electron prod mode.",
+        "solution": {
+          "spring_side": "Add Electron origin to @CrossOrigin or WebMvcConfigurer.addCorsMappings. For file://, origin is 'null' (literal string). Allow: 'null', 'http://localhost:5173' (dev), 'https://admin.tbnws.com' (web prod).",
+          "vite_proxy": "Dev mode: vite server.proxy /api → localhost:8080 (already designed, not implemented). CORS irrelevant in dev.",
+          "electron_workaround": "session.webRequest.onBeforeSendHeaders to inject custom header, or disable webSecurity (NOT recommended for production)."
+        }
+      },
+      {
+        "id": "PI-3",
+        "severity": "MEDIUM",
+        "area": "Electron Deep Link + Dynamic Routes",
+        "problem": "react-router dynamic routes (/tickets/2641) generate URLs. If user copies and pastes this URL into another Electron window or after app restart, the Electron app doesn't have a URL bar — it always loads index.html. The JS router then reads window.location and resolves the route.",
+        "impact": "With createBrowserRouter + file://, window.location.pathname is always '/index.html'. Dynamic routes break.",
+        "solution": "createHashRouter resolves this entirely. Hash (#/tickets/2641) is client-side only, preserved across refreshes."
+      },
+      {
+        "id": "PI-4",
+        "severity": "MEDIUM",
+        "area": "JWT Token Storage in Electron",
+        "problem": "Design specifies safeStorage IPC for Electron + in-memory for web. But safeStorage requires Electron main process access, and sandbox: true limits preload capabilities.",
+        "impact": "Token persistence between Electron app restarts may not work without correct IPC implementation.",
+        "solution": "safeStorage works fine with sandbox: true — it runs in main process, not renderer. IPC invoke/handle pattern already established for get-version. Add 3 more handlers: secure-store-get/set/delete."
+      },
+      {
+        "id": "PI-5",
+        "severity": "LOW",
+        "area": "Electron DevTools in Production",
+        "problem": "electron/main.cjs line 44: mainWindow.webContents.openDevTools({ mode: 'right' }) runs in dev mode (isDev=true). If isDev check fails in some edge case, DevTools open in production.",
+        "impact": "Users see DevTools panel. Security/UX issue.",
+        "solution": "Remove openDevTools entirely from production builds. Use electron-builder afterPack hook to strip dev-only code. Or add explicit: if (isDev && !app.isPackaged) guard."
+      }
+    ]
+  },
+
+  "section3_mobile_web_compatibility": {
+    "title": "(3) Mobile Web Compatibility (520px breakpoint)",
+    "grade": "B+",
+
+    "current_state": {
+      "implemented": [
+        "CSS Grid responsive: 4-row × 2-col (desktop) → 4-row × 1-col (mobile)",
+        "@custom-variant desktop { @media (min-width: 521px) } in index.css",
+        "Sidebar: fixed overlay with slide transition on mobile",
+        "Header: hamburger menu + mobile logo on mobile",
+        "Statusbar: condensed info on mobile"
+      ],
+      "breakpoint": "520px (single breakpoint, not multi-tier)"
+    },
+
+    "design_coverage": [
+      { "page": "CustomerPage", "mobile_design": "YES (slides/01)", "detail": "검색 stacked, KPI 2열, 탭 가로 스크롤, 카드형 리스트" },
+      { "page": "ConsultationPage", "mobile_design": "YES (slides/02)", "detail": "필터 stacked, 카드 리스트, SidePanel→풀 Modal" },
+      { "page": "TicketListPage", "mobile_design": "YES (prototype-v2)", "detail": "스코프 토글, 카드 리스트, 일괄 액션 숨김" },
+      { "page": "TicketDetailPage", "mobile_design": "PARTIAL", "detail": "6-step 스텝퍼 가로 스크롤, 탭 아래 배치, 우측 패널→상단 접이식" },
+      { "page": "CostTrackingPage", "mobile_design": "YES (slides/06)", "detail": "KPI 2열, 월별 집계 가로 스크롤, 비용 입력 bottom-sheet" },
+      { "page": "ShipmentPage", "mobile_design": "YES (slides/07)", "detail": "카드 리스트, 출고 생성 bottom-sheet" },
+      { "page": "RecallPage", "mobile_design": "YES (slides/08)", "detail": "KPI 2열, 카드 리스트" },
+      { "page": "TicketAssignPage", "mobile_design": "YES (slides/12)", "detail": "2-tab (미배정/현황), DnD→드롭다운 대체" }
+    ],
+
+    "issues": [
+      {
+        "id": "MOB-1",
+        "severity": "MEDIUM",
+        "issue": "DataTable 11컬럼은 520px 화면에 맞지 않음. 모바일에서는 카드형 리스트로 전환 필요.",
+        "solution": "DataTable에 mobileView prop 추가. desktop: table, mobile: card list. 또는 columns 중 mobile_columns만 표시."
+      },
+      {
+        "id": "MOB-2",
+        "severity": "MEDIUM",
+        "issue": "6-step 스텝퍼가 모바일에서 가로 오버플로. 520px에 6개 스텝 + 라벨 못 들어감.",
+        "solution": "모바일: '3/6 진단' 형태로 현재 스텝만 표시 + 좌우 화살표. bidirectional-navigation-architecture에서 이미 제안됨."
+      },
+      {
+        "id": "MOB-3",
+        "severity": "LOW",
+        "issue": "Modal이 모바일에서 max-width 제한으로 너무 작거나 키보드 올라오면 폼이 가려짐.",
+        "solution": "모바일에서 Modal → bottom-sheet 패턴 적용. CSS: position: fixed, bottom: 0, width: 100%."
+      }
+    ]
+  },
+
+  "section4_schedule_and_risks": {
+    "title": "(4) Schedule & Risk Assessment",
+
+    "current_schedule": {
+      "source": "docs/implementation-checklist-and-test-plan.json",
+      "sprints": 6,
+      "total_hours": 292,
+      "total_weeks": "7.3 weeks (1 developer)",
+      "with_testing": "319.5 hours (8 weeks)"
+    },
+
+    "schedule_assessment": {
+      "sprint_0_foundation": {
+        "planned": "1 week (40h)",
+        "realistic": "1.5 weeks",
+        "reason": "14개 UI 컴포넌트를 2일(16h)로 추정은 낙관적. TypeScript 6 + 신규 라이브러리 호환 이슈 해결 시간 미포함.",
+        "adjustment": "+0.5 week buffer"
+      },
+      "sprint_1_ticket_crud": {
+        "planned": "1.5 weeks (62h)",
+        "realistic": "2 weeks",
+        "reason": "TicketDetailPage 18개 sub-component(12h) + Spring 백엔드 병렬 진행 필요. 백엔드 대기 시 MSW mock 필요.",
+        "adjustment": "+0.5 week (MSW mock + TicketDetail 복잡도)"
+      },
+      "sprint_2_3_4": {
+        "planned": "4.5 weeks",
+        "realistic": "4.5 weeks",
+        "reason": "이전 스프린트에서 공통 컴포넌트/패턴 확립되므로 추정치 합리적."
+      },
+      "sprint_5_integration": {
+        "planned": "1 week (42h)",
+        "realistic": "1.5 weeks",
+        "reason": "반응형 QA + Electron 빌드 + E2E 테스트 + 버그 수정. QA만 1일은 부족.",
+        "adjustment": "+0.5 week"
+      },
+      "revised_total": "9.5 weeks (original 8 + 1.5 buffer)"
+    },
+
+    "risks": [
+      {
+        "id": "RISK-1",
+        "severity": "CRITICAL",
+        "risk": "Spring 백엔드 API 미준비",
+        "probability": "HIGH",
+        "impact": "Sprint 1~4 전체 차단",
+        "mitigation": "MSW (Mock Service Worker) 목 핸들러 구축. 프론트엔드는 목으로 개발, 백엔드 준비되면 교체. docs/backend-api-and-schema.json이 API 계약서 역할.",
+        "effort": "8h (45개 엔드포인트 목 핸들러)"
+      },
+      {
+        "id": "RISK-2",
+        "severity": "HIGH",
+        "risk": "Electron file:// + createBrowserRouter 비호환",
+        "probability": "CERTAIN (known issue)",
+        "impact": "Electron 프로덕션에서 라우팅 완전 실패",
+        "mitigation": "createHashRouter 사용 또는 Electron-only 조건 분기. Sprint 0에서 즉시 해결.",
+        "effort": "2h"
+      },
+      {
+        "id": "RISK-3",
+        "severity": "HIGH",
+        "risk": "CORS: Electron → Spring API",
+        "probability": "HIGH (prod 환경에서)",
+        "impact": "모든 API 호출 차단",
+        "mitigation": "Spring CORS 설정에 'null' origin 추가 (Electron file://). Dev에서는 vite proxy로 우회.",
+        "effort": "1h (Spring 설정) + 1h (vite proxy)"
+      },
+      {
+        "id": "RISK-4",
+        "severity": "MEDIUM",
+        "risk": "설계 대 코드 갭 극심 (440KB 설계 vs 29파일 placeholder)",
+        "probability": "CERTAIN",
+        "impact": "설계 변환에 예상보다 시간 소요. 설계 문서 간 불일치 발견 시 해결 비용.",
+        "mitigation": "Sprint 0에서 핵심 기반(api/stores/types/guards) 먼저 구축. 설계 문서를 참조용으로만 사용, 코드 구현 시 실용적 판단 우선."
+      },
+      {
+        "id": "RISK-5",
+        "severity": "MEDIUM",
+        "risk": "TypeScript 6 + 신규 라이브러리 호환 이슈",
+        "probability": "MEDIUM",
+        "impact": "Sprint 0에서 하루 이상 디버깅",
+        "mitigation": "Sprint 0 첫 날에 모든 deps 설치 후 즉시 tsc --noEmit. 호환 안 되면 skipLibCheck: true (이미 설정됨) 또는 TS 5.x 폴백."
+      }
+    ]
+  },
+
+  "section5_phase2_alignment": {
+    "title": "(5) Phase 2 ROADMAP Alignment",
+
+    "phase2_dod": [
+      "Electron 창에서 로그인 후 고객 조회 가능",
+      "모바일 브라우저에서도 동일 기능 접근 가능"
+    ],
+
+    "coverage_matrix": [
+      {
+        "dod_item": "React + Electron 프로젝트 설정",
+        "design_coverage": "FULL — vite.config, electron/main.cjs, electron-builder.yml 완성",
+        "code_status": "DONE",
+        "gap": "None"
+      },
+      {
+        "dod_item": "Spring API 연동 레이어 및 HTTP 클라이언트",
+        "design_coverage": "FULL — apiClient 설계 + 45 API 엔드포인트 정의",
+        "code_status": "0% — src/api/ 없음, axios 미설치",
+        "gap": "CRITICAL — Sprint 0 S0-01~S0-04 필수"
+      },
+      {
+        "dod_item": "로그인·권한 시스템",
+        "design_coverage": "FULL — authStore + RequireAuth + Can + RBAC 4역할",
+        "code_status": "0% — zustand 미설치, /login 라우트 없음",
+        "gap": "CRITICAL — Sprint 0 S0-05~S0-11 필수"
+      },
+      {
+        "dod_item": "고객 전화번호 조회 페이지",
+        "design_coverage": "FULL — 12 sub-components + 5 tabs + 9 API",
+        "code_status": "0% — 10줄 placeholder",
+        "gap": "HIGH — Sprint 0 후 16h 소요"
+      },
+      {
+        "dod_item": "전체 대시보드 뼈대",
+        "design_coverage": "FULL — 9 dashboard sections + 30s auto-refresh",
+        "code_status": "30% — KPI 4종 골격 있으나 값 하드코딩 '—'",
+        "gap": "MEDIUM — API 연동만 하면 완성"
+      },
+      {
+        "dod_item": "Electron 창에서 로그인 후 고객 조회",
+        "design_coverage": "FULL",
+        "code_status": "0%",
+        "gap": "CRITICAL — file:// 라우팅 이슈(PI-1) + CORS(PI-2) 해결 필수"
+      },
+      {
+        "dod_item": "모바일 브라우저에서도 동일 기능",
+        "design_coverage": "FULL — 520px responsive design + mobile wireframes",
+        "code_status": "50% — layout shell responsive 완성, 페이지 내용 미구현",
+        "gap": "MEDIUM — 페이지 구현 시 desktop: variant 사용 + mobile 테스트"
+      }
+    ],
+
+    "phase2_completion_estimate": {
+      "with_sprint_0": "Sprint 0 (1.5 weeks) + CustomerPage (0.5 week) + Dashboard API wiring (0.25 week) = ~2.25 weeks for Phase 2 DoD",
+      "prerequisite": "Electron PI-1(hash router) + PI-2(CORS) 해결",
+      "deliverable": "login → dashboard KPI → customer search → 5-tab detail (all working in Electron + mobile browser)"
+    }
+  },
+
+  "verdict": {
+    "title": "Final Verdict",
+
+    "approval_status": "CONDITIONALLY APPROVED",
+
+    "approval_conditions": [
+      {
+        "condition": "C-1: Electron 라우팅 전략 확정",
+        "detail": "createBrowserRouter → createHashRouter 전환 (또는 조건 분기). Sprint 0 첫 날에 해결.",
+        "effort": "2h",
+        "blocker_for": "Electron 프로덕션 빌드 전체"
+      },
+      {
+        "condition": "C-2: Spring CORS 설정 합의",
+        "detail": "Spring 팀과 Electron origin('null') + web origin 허용 설정 확인.",
+        "effort": "1h (설정) + Spring 팀 응답 대기",
+        "blocker_for": "Electron에서 API 호출 전체"
+      },
+      {
+        "condition": "C-3: as_tickets DDL 정의",
+        "detail": "핵심 테이블 DDL이 어떤 설계 문서에도 없음. 6개 다른 테이블의 FK 참조 대상.",
+        "effort": "2h",
+        "blocker_for": "Sprint 1 백엔드 작업 전체"
+      },
+      {
+        "condition": "C-4: MSW 목 핸들러 준비",
+        "detail": "Spring 백엔드 대기 시 프론트엔드 개발 차단 방지. 45 API 목 핸들러.",
+        "effort": "8h",
+        "blocker_for": "Sprint 1~4 프론트엔드 독립 개발"
+      },
+      {
+        "condition": "C-5: router.tsx /tickets/:ticketId 동적 라우트 추가",
+        "detail": "현재 '/4' 고정 경로. 동적 라우트 없이 티켓 CRUD 불가.",
+        "effort": "2h",
+        "blocker_for": "Phase 3 전체"
+      }
+    ],
+
+    "strengths": [
+      "설계 문서 19개(440KB)가 매우 포괄적 — Phase 2~5 전 범위 커버",
+      "기술 스택(React 19 + Vite 8 + TS 6 + Tailwind 4 + Electron 41)이 최신이고 안정적",
+      "레이아웃 셸(4행×2열 Grid, 520px 반응형, Sidebar, Header)이 이미 완성",
+      "도메인 규칙(CLAUDE.md)과 설계 문서 간 일관성 높음",
+      "상태관리 전략(zustand + react-query)이 프로젝트 규모에 적합",
+      "양방향 네비게이션 설계(URL params + react-query cache)가 기술적으로 건전"
+    ],
+
+    "weaknesses": [
+      "코드 29파일 vs 설계 440KB — 극심한 불균형 (설계 과잉, 코드 부족)",
+      "Phase 2 기반 인프라(api/stores/guards/types) 0% — 모든 것의 선행 조건 미충족",
+      "Electron + SPA 라우팅 호환 이슈 미해결 (PI-1: createBrowserRouter vs file://)",
+      "as_tickets DDL 누락 — 전체 DB 스키마의 중심 테이블 미정의",
+      "일정 추정 낙관적 (8 weeks → 실제 9.5 weeks)"
+    ],
+
+    "recommendations": [
+      "즉시: PI-1(hash router) + PI-2(CORS) + PI-5(router.tsx) 해결 (총 5h)",
+      "Sprint 0 전: as_tickets DDL 정의 + Spring 팀 API 계약 확인 (총 4h)",
+      "Sprint 0 중: MSW 목 핸들러 45개 구축 (8h) — 백엔드 독립 개발 보장",
+      "Sprint 1~4: 설계 문서를 참조하되 과도한 충실도 추구 않기 — 실용적 구현 우선",
+      "일정: 공식 일정 8주에 1.5주 버퍼 추가 → 9.5주로 조정"
+    ]
+  }
+}
