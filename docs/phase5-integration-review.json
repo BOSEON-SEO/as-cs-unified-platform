@@ -1,0 +1,455 @@
+{
+  "meta": {
+    "document": "Phase 5 Integration Review — AI Suggestion + MailLog + Statistics/CSV",
+    "createdAt": "2026-04-29",
+    "reviewed_documents": [
+      "docs/ai-suggestion-design.json (29KB, 4 APIs, 4 suggestion types)",
+      "docs/mail-sms-design.json (31KB, 8 APIs, 3 channels)",
+      "docs/statistics-report-csv-design.json (30KB, 14 APIs, 5 CSV types)"
+    ],
+    "cross_referenced": [
+      "CLAUDE.md (domain rules)",
+      "ROADMAP.md (Phase 5 scope)",
+      "docs/ticket-lifecycle-tracking.md (event system)"
+    ]
+  },
+
+  "section1_technical_feasibility": {
+    "title": "(1) Technical Feasibility Assessment",
+
+    "ai_suggestion": {
+      "score": "85/100",
+      "feasible": true,
+      "strengths": [
+        "Proxy architecture (React->Spring->Claude) correctly isolates PII and API keys from frontend",
+        "4 suggestion types are well-scoped: each has clear input/output/prompt structure",
+        "PII masking rules are explicit (name->surname, phone->last4, email->masked, address->omit)",
+        "Rate limiting (30/user/hr, 10/ticket/hr, 500/global/hr) prevents abuse",
+        "Adoption tracking (adopted/dismissed/null tri-state) enables ROI measurement"
+      ],
+      "concerns": [
+        {
+          "id": "TF-AI-1",
+          "severity": "HIGH",
+          "issue": "Tailscale VPN dependency creates single point of failure. If VPN is down, all AI features are unavailable.",
+          "mitigation": "Add health check endpoint GET /api/ai/health that pings Claude API. Show VPN status in Statusbar. Degrade gracefully: hide AI panel if health check fails."
+        },
+        {
+          "id": "TF-AI-2",
+          "severity": "MEDIUM",
+          "issue": "Claude API response time is unpredictable (design says avg 1.4s). Complex prompts with 40K+ case context could take 5-10s, blocking UI.",
+          "mitigation": "Use streaming response (SSE) instead of waiting for full response. Display partial results as they arrive. Show skeleton UI during loading."
+        },
+        {
+          "id": "TF-AI-3",
+          "severity": "MEDIUM",
+          "issue": "system_prompt_hash stored in DB for version tracking, but no mechanism to manage or roll back prompt versions.",
+          "mitigation": "Create as_prompt_versions table or store full prompts in a config file versioned by git. Hash alone is not sufficient for debugging."
+        },
+        {
+          "id": "TF-AI-4",
+          "severity": "LOW",
+          "issue": "SIMILAR_CASES type requires Spring to pre-filter top 20 candidates from DB before sending to Claude. The filtering logic (by product model) may miss relevant cross-product cases.",
+          "mitigation": "Acceptable for MVP. Consider adding embedding-based similarity search in future iteration."
+        }
+      ]
+    },
+
+    "mail_log": {
+      "score": "92/100",
+      "feasible": true,
+      "strengths": [
+        "MailLog-first pattern (INSERT before gateway call) guarantees no send without log, per CLAUDE.md rule",
+        "3 channel adapters with Strategy pattern allows adding new channels without modifying core logic",
+        "Retry strategy (3 attempts: immediate/5min/30min) with exponential backoff is production-ready",
+        "parent_log_id chain for resend tracking is clean relational design",
+        "Alimtalk->SMS fallback with separate log entries maintains full audit trail"
+      ],
+      "concerns": [
+        {
+          "id": "TF-ML-1",
+          "severity": "MEDIUM",
+          "issue": "System auto-triggers (6 types) use @TransactionalEventListener. If the event listener throws, the parent transaction may or may not roll back depending on Spring configuration. A failed SMS send on TICKET_CREATED could potentially roll back the ticket creation.",
+          "mitigation": "Use @TransactionalEventListener(phase = AFTER_COMMIT) to ensure send happens after ticket is committed. If send fails, only the MailLog is affected, not the ticket."
+        },
+        {
+          "id": "TF-ML-2",
+          "severity": "MEDIUM",
+          "issue": "content_html column is MEDIUMTEXT (up to 16MB). Large HTML emails with inline images could bloat the table rapidly.",
+          "mitigation": "Add constraint: max 500KB for content_html. Store inline images as separate attachments with URLs, not base64 in HTML."
+        },
+        {
+          "id": "TF-ML-3",
+          "severity": "LOW",
+          "issue": "batch-resend endpoint (POST /api/mail-logs/batch-resend) creates N new rows and N gateway calls. With 100+ failed logs, this could overwhelm the SMS gateway.",
+          "mitigation": "Add batch size limit (max 20 per request). Process sequentially with 100ms delay between sends. Show progress indicator."
+        }
+      ]
+    },
+
+    "statistics_csv": {
+      "score": "88/100",
+      "feasible": true,
+      "strengths": [
+        "Server-side streaming CSV (StreamingResponseBody) handles 100K+ rows without OOM",
+        "UTF-8 BOM for Korean Excel compatibility is a critical detail correctly addressed",
+        "5 CSV types cover all major data domains (tickets, costs, compensation, mail, summary)",
+        "PII masking per role in exports prevents data leakage",
+        "SXSSFWorkbook for XLSX with 100-row window is correct Apache POI pattern"
+      ],
+      "concerns": [
+        {
+          "id": "TF-CSV-1",
+          "severity": "HIGH",
+          "issue": "14 API endpoints for statistics is the largest API surface in the project. Many endpoints overlap (e.g., /api/stats/trend vs /api/stats/cost-trend vs /api/dashboard/stats?view=trend). This creates maintenance burden and inconsistency risk.",
+          "mitigation": "Consolidate into fewer endpoints with query parameters: GET /api/stats?view={view}&period={period}. Reduce from 14 to ~7 endpoints."
+        },
+        {
+          "id": "TF-CSV-2",
+          "severity": "MEDIUM",
+          "issue": "30-second auto-refresh polling for dashboard KPIs. With 12 users, that's 24 requests/minute to statistics endpoints. Complex aggregation queries (JOINing tickets+events+costs) could strain MySQL.",
+          "mitigation": "Add server-side cache (Spring @Cacheable, TTL 30s). Dashboard API should read from cache, not recalculate on every request. Cache invalidation on ticket/cost changes."
+        },
+        {
+          "id": "TF-CSV-3",
+          "severity": "MEDIUM",
+          "issue": "PDF generation (iText/OpenPDF) requires adding a Java library dependency. PDF layout for Korean text with tables is notoriously difficult.",
+          "mitigation": "Defer PDF to post-MVP. CSV and XLSX cover 95% of use cases. If PDF is needed, consider HTML-to-PDF (Playwright/Puppeteer server-side) which handles Korean better."
+        },
+        {
+          "id": "TF-CSV-4",
+          "severity": "LOW",
+          "issue": "action_queue patterns (8 types) require complex SQL queries (e.g., zombie: no event for 14+ days, fake_close: CLOSED but no shipment). These queries scan full ticket+event tables.",
+          "mitigation": "Run action queue detection as scheduled batch (every 5 min), store results in a cache/summary table. Dashboard reads from summary, not live query."
+        }
+      ]
+    }
+  },
+
+  "section2_data_flow": {
+    "title": "(2) Cross-Feature Data Flow & API Dependencies",
+
+    "dependency_diagram": [
+      "┌──────────────────────────────────────────────────────────────────────┐",
+      "│                                                                      │",
+      "│                        ┌─────────────┐                               │",
+      "│                   ┌───>│  as_tickets  │<───────────────┐              │",
+      "│                   │    └──────┬───────┘                │              │",
+      "│                   │           │ FK                     │ FK           │",
+      "│                   │           v                        v              │",
+      "│    ┌──────────────┴──┐  ┌───────────────┐   ┌────────────────┐       │",
+      "│    │  as_ai_logs     │  │ as_mail_logs  │   │ as_ticket_events│       │",
+      "│    │  (AI Suggestion)│  │ (MailLog)     │   │ (Event History) │       │",
+      "│    └───────┬─────────┘  └───────┬───────┘   └────────┬───────┘       │",
+      "│            │                    │                     │               │",
+      "│            │  suggestion_id     │  mail_log_id        │  event_id     │",
+      "│            │  referenced by     │  referenced by      │  drives       │",
+      "│            v                    v                     v               │",
+      "│    ┌────────────────────────────────────────────────────────┐         │",
+      "│    │              as_ticket_events (integration point)      │         │",
+      "│    │  EMAIL_SENT payload: { mailLogId: 50001 }             │         │",
+      "│    │  LLM_SUGGESTION_VIEWED payload: { suggestionId: 1001 }│         │",
+      "│    │  FIRST_RESPONSE: auto-detected from mail events       │         │",
+      "│    └───────────────────────────┬────────────────────────────┘         │",
+      "│                                │                                     │",
+      "│                                │ aggregated by                       │",
+      "│                                v                                     │",
+      "│    ┌────────────────────────────────────────────────────────┐         │",
+      "│    │           Statistics / Reports / CSV Export             │         │",
+      "│    │  reads from: tickets + events + costs + mail_logs      │         │",
+      "│    │  reads from: ai_logs (adoption rate for AI KPI)        │         │",
+      "│    └────────────────────────────────────────────────────────┘         │",
+      "│                                                                      │",
+      "└──────────────────────────────────────────────────────────────────────┘"
+    ],
+
+    "cross_feature_dependencies": [
+      {
+        "id": "DEP-1",
+        "from": "AI Suggestion (RESPONSE_DRAFT)",
+        "to": "MailLog (POST /api/messages/send)",
+        "flow": "User clicks '📧 이메일로 사용' on AI draft -> opens email compose modal with AI content pre-filled -> user reviews and clicks [발송] -> POST /api/messages/send with content from AI -> MailLog created -> EMAIL_SENT event -> if first outbound: FIRST_RESPONSE event",
+        "dependency_type": "Sequential user action",
+        "risk": "If MailLog API is down, AI draft cannot be sent. But draft remains visible for copy-paste."
+      },
+      {
+        "id": "DEP-2",
+        "from": "AI Suggestion (as_ai_logs.adopted)",
+        "to": "Statistics (AI KPI: adoption rate)",
+        "flow": "as_ai_logs.adopted column -> GET /api/ai/stats -> Statistics dashboard AI KPI section",
+        "dependency_type": "Read-only aggregation",
+        "risk": "If ai_logs table is empty (no AI usage yet), stats API should return zeros, not error."
+      },
+      {
+        "id": "DEP-3",
+        "from": "MailLog (as_mail_logs)",
+        "to": "Statistics (mail_stats section + MAIL_LOG CSV)",
+        "flow": "GET /api/mail-logs/stats aggregates as_mail_logs -> dashboard mail_stats KPI. GET /api/export/mail-logs streams as_mail_logs -> CSV file.",
+        "dependency_type": "Read-only aggregation",
+        "risk": "as_mail_logs with 2.6M rows (existing tbnws_send_sms_result migration). Stats query must use indexed columns (channel, status, created_at)."
+      },
+      {
+        "id": "DEP-4",
+        "from": "MailLog (EMAIL_SENT/SMS_SENT events)",
+        "to": "Statistics (SLA: FIRST_RESPONSE time)",
+        "flow": "FIRST_RESPONSE event auto-generated when MailLog sends first outbound comm -> SLA summary calculates first response time from this event.",
+        "dependency_type": "Event chain",
+        "risk": "If FIRST_RESPONSE detection fails (ticket-lifecycle-tracking.md logic bug), SLA metrics will be inaccurate."
+      },
+      {
+        "id": "DEP-5",
+        "from": "AI Suggestion (LLM_SUGGESTION_VIEWED event)",
+        "to": "Ticket Timeline (EventTimeline component)",
+        "flow": "When AI panel is viewed, LLM_SUGGESTION_VIEWED event is logged to as_ticket_events -> appears in ticket timeline with slate dot.",
+        "dependency_type": "Implicit logging",
+        "risk": "Debounce (1 per session) must be implemented correctly. Without debounce, every panel toggle creates a new event."
+      },
+      {
+        "id": "DEP-6",
+        "from": "Statistics (CSV export)",
+        "to": "MailLog + AI logs (data source)",
+        "flow": "MAIL_LOG CSV reads as_mail_logs. MONTHLY_SUMMARY CSV includes emailCount, smsCount, mailSuccessRate which aggregate as_mail_logs. AI adoption rate included in custom reports.",
+        "dependency_type": "Read-only join",
+        "risk": "CSV export must not lock tables during streaming. Use READ COMMITTED isolation or read replicas."
+      }
+    ],
+
+    "shared_infrastructure": {
+      "as_ticket_events": "All 3 features write to or read from this table. EMAIL_SENT, SMS_SENT, LLM_SUGGESTION_VIEWED events. Statistics aggregates all events for KPI.",
+      "spring_auth": "All 3 features use the same JWT auth + RBAC. No additional auth mechanism needed.",
+      "react_query": "All 3 features use the same QueryClient. Invalidation rules must not conflict."
+    }
+  },
+
+  "section3_priority": {
+    "title": "(3) Implementation Priority: MailLog → Statistics/CSV → AI Suggestion",
+
+    "recommended_order": [
+      {
+        "priority": 1,
+        "feature": "MailLog (Email/SMS Sending)",
+        "rationale": [
+          "CLAUDE.md DoD explicitly requires: '이메일 발송 시 MailLog 자동 생성 확인' — this is a Phase 5 exit criterion",
+          "ROADMAP.md Phase 5 DoD #1: '이메일 발송 시 MailLog 자동 생성' — first item listed",
+          "MailLog is a dependency for AI suggestion (RESPONSE_DRAFT -> send via MailLog)",
+          "MailLog is a dependency for Statistics (mail_stats KPI, CSV export, FIRST_RESPONSE SLA)",
+          "MailLog uses existing infrastructure (SMTP, SMS gateway) with lowest external dependency risk",
+          "6 system auto-triggers are needed by earlier phases (TICKET_CREATED notification, SHIPMENT_DISPATCHED notification)"
+        ],
+        "effort": "~1 week (3 channel adapters + 8 API endpoints + as_mail_logs table + event linking)",
+        "blocks": ["Statistics mail_stats", "AI RESPONSE_DRAFT send flow", "FIRST_RESPONSE SLA calculation"]
+      },
+      {
+        "priority": 2,
+        "feature": "Statistics/CSV (Reports + Dashboard)",
+        "rationale": [
+          "Statistics dashboard (#14) is the index page ('/') — every user sees it on login",
+          "Report page (#13) is needed by TEAM_LEAD and ADMIN for monthly operations review",
+          "CSV export provides immediate business value (replaces manual Excel process)",
+          "Statistics reads from existing data (tickets, costs, events, mail_logs) — no new writes",
+          "No external dependency (no VPN, no 3rd-party API) — purely database aggregation",
+          "Chart library (Recharts) needs to be selected and integrated once, shared across pages"
+        ],
+        "effort": "~1.5 weeks (9 dashboard sections + 5 CSV types + 14 API endpoints + report CRUD)",
+        "blocks": ["Nothing (leaf node in dependency graph)"]
+      },
+      {
+        "priority": 3,
+        "feature": "AI Suggestion (Claude API)",
+        "rationale": [
+          "ROADMAP.md Phase 5 DoD #2: 'LLM 답변 제안 표시 (자동 발송 없음)' — second item",
+          "Depends on MailLog being ready (RESPONSE_DRAFT -> email send flow)",
+          "Depends on Tailscale VPN being available (external infrastructure dependency)",
+          "Highest complexity: PII masking, prompt engineering, streaming responses, adoption tracking",
+          "Highest risk: VPN downtime, Claude API latency, prompt quality tuning",
+          "Can function as standalone (AI panel works without MailLog, just can't send drafts)",
+          "12 users — low urgency. Manual diagnosis works fine without AI assistance."
+        ],
+        "effort": "~1.5 weeks (4 suggestion types + proxy service + PII masking + as_ai_logs + adoption UI)",
+        "blocks": ["Nothing (fully optional feature)"]
+      }
+    ],
+
+    "why_not_ai_first": [
+      "AI depends on MailLog for the RESPONSE_DRAFT -> send flow. Without MailLog, users can see AI drafts but cannot send them, making the feature feel incomplete.",
+      "AI depends on Tailscale VPN (external infra). If VPN setup is delayed, AI is blocked. MailLog and Statistics have zero external dependencies.",
+      "CLAUDE.md DoD prioritizes MailLog over AI: 'MailLog 자동 생성 확인' is listed BEFORE 'LLM 답변 제안 표시'.",
+      "Statistics/CSV provides immediate business value to TEAM_LEAD (2) and ADMIN (1) — they need monthly reports NOW. AI is a productivity enhancement, not a blocker."
+    ],
+
+    "parallel_opportunities": [
+      "MailLog backend + Statistics frontend can be developed in parallel (different pages, no shared components)",
+      "AI prompt engineering and testing can start during MailLog/Statistics implementation (no code dependency, just prompt iteration in a notebook)",
+      "CSV export hook (useExportDownload) is reusable across all pages — build once during Statistics phase"
+    ]
+  },
+
+  "section4_risks_and_improvements": {
+    "title": "(4) Risks & Improvements",
+
+    "risks": [
+      {
+        "id": "RISK-1",
+        "severity": "HIGH",
+        "area": "Log Table Growth",
+        "detail": "as_mail_logs will grow rapidly. Existing data: tbnws_send_sms_result has 2.6M rows. With new system adding emails + alimtalk, expect 3-5M rows/year. as_ai_logs adds ~50K rows/year (500 calls/day * 100 workdays). as_ticket_events adds ~100K rows/year.",
+        "impact": "Query performance degradation on unindexed columns. Storage cost increase. Backup time increase.",
+        "mitigation": [
+          "as_mail_logs: Partition by month (PARTITION BY RANGE on created_at). Keep 12 months online, archive older to cold storage.",
+          "as_mail_logs.raw_response (TEXT): purge after 90 days. Set to NULL via scheduled job.",
+          "as_ai_logs.raw_response (TEXT): same 90-day purge.",
+          "Add monitoring: alert when any table exceeds 5M rows."
+        ]
+      },
+      {
+        "id": "RISK-2",
+        "severity": "HIGH",
+        "area": "Tailscale VPN Availability",
+        "detail": "AI Suggestion depends entirely on Tailscale VPN to reach local Claude API. VPN disruptions (Tailscale service outage, local server reboot, network misconfiguration) will make AI features 100% unavailable.",
+        "impact": "AI suggestion panel shows error state. Users lose productivity tool. No fallback.",
+        "mitigation": [
+          "Health check: GET /api/ai/health every 60s from Spring. Cache result. Frontend reads cached status.",
+          "Statusbar already shows '🤖 AI 서포트 (Claude) ●'. Change to '⚠ offline' when health check fails.",
+          "Degrade gracefully: AiSuggestionPanel shows '현재 AI 서비스에 연결할 수 없습니다' instead of crashing.",
+          "Queue requests during short outages (<5min). Retry on reconnection."
+        ]
+      },
+      {
+        "id": "RISK-3",
+        "severity": "MEDIUM",
+        "area": "Claude API Rate Limits & Costs",
+        "detail": "Design specifies 500 requests/hour global limit. With 12 users, that's ~42 per user per hour. Claude API may have its own rate limits depending on plan. Token costs accumulate (input_tokens + output_tokens).",
+        "impact": "Users hit rate limit during peak hours. Unexpected API costs.",
+        "mitigation": [
+          "Monitor token usage via as_ai_logs (input_tokens + output_tokens). Monthly cost report.",
+          "Optimize prompts: reduce system_prompt length, limit context injection to top 5 cases (not 20).",
+          "Cache identical queries: if same productModel+symptom was analyzed within 1 hour, return cached result from as_ai_logs.",
+          "Show remaining quota to user: '남은 호출: 28/30 (시간당)'"
+        ]
+      },
+      {
+        "id": "RISK-4",
+        "severity": "MEDIUM",
+        "area": "SMTP/SMS Gateway Reliability",
+        "detail": "MailLog depends on existing admin SMTP and SMS gateways. These are shared infrastructure — other systems also use them. Outages or rate limits on shared gateways affect this platform.",
+        "impact": "Email/SMS sends fail. MailLog shows FAILED status. System auto-triggers don't deliver notifications.",
+        "mitigation": [
+          "Retry strategy already covers transient failures (3 attempts).",
+          "For critical notifications (TICKET_CREATED, TICKET_CLOSED), add a 'notification_pending' flag on the ticket. Show in dashboard action queue.",
+          "Monitor gateway health: log success rate per hour. Alert ADMIN if success rate drops below 95%."
+        ]
+      },
+      {
+        "id": "RISK-5",
+        "severity": "MEDIUM",
+        "area": "Statistics Query Performance",
+        "detail": "Dashboard makes 7+ API calls on page load, each running aggregation queries across tickets+events+costs+mail_logs. With 30s polling, this is continuous load.",
+        "impact": "Slow dashboard load (>3s). MySQL lock contention with CRUD operations.",
+        "mitigation": [
+          "Server-side cache (@Cacheable, TTL 30s). Cache key includes role + scope.",
+          "Action queue: precompute in batch job (every 5min), store in as_action_queue_cache table.",
+          "Statistics API should use READ COMMITTED isolation to avoid blocking writes.",
+          "Consider materialized view or summary table for monthly aggregations."
+        ]
+      },
+      {
+        "id": "RISK-6",
+        "severity": "LOW",
+        "area": "CSV Large File Download",
+        "detail": "TICKET_LIST CSV with 20 columns * 10K rows ≈ 2MB. MAIL_LOG CSV with 2.6M rows ≈ 500MB. Large downloads may time out on slow connections or mobile.",
+        "impact": "Download fails midway. User retries, doubling server load.",
+        "mitigation": [
+          "For > 50K rows: show confirmation dialog with estimated file size.",
+          "Support date range filter to limit row count (required, not optional).",
+          "Consider async export: POST /api/export/start -> returns jobId -> GET /api/export/status/{jobId} -> GET /api/export/download/{jobId}.",
+          "Max export rows: CSV 500K, XLSX 100K (already specified)."
+        ]
+      }
+    ],
+
+    "improvements": [
+      {
+        "id": "IMP-1",
+        "area": "Unified Message Service",
+        "current": "AI suggestion and MailLog have separate send flows. AI draft goes to email compose modal, which then calls POST /api/messages/send.",
+        "proposed": "Create a MessageComposer component that accepts pre-filled content (from AI, from template, or freeform). Both AI draft and manual compose use the same component. Single code path to POST /api/messages/send.",
+        "benefit": "Reduces duplicate UI code. Ensures all sends go through MailLog regardless of source."
+      },
+      {
+        "id": "IMP-2",
+        "area": "Consolidated Statistics API",
+        "current": "14 separate API endpoints for statistics (trend, product-frequency, symptom-distribution, etc.).",
+        "proposed": "Consolidate to 3 endpoints: GET /api/stats (with view param), GET /api/stats/action-queue, GET /api/reports. Frontend fetches specific views via query params.",
+        "benefit": "Fewer endpoints to maintain. Easier to add new chart types without new endpoints."
+      },
+      {
+        "id": "IMP-3",
+        "area": "AI Suggestion Caching",
+        "current": "Every AI request goes to Claude API, even if identical query was made recently.",
+        "proposed": "Before calling Claude, check as_ai_logs for matching (suggestion_type + input_params_hash) within last 1 hour. If found, return cached output_content. Log as 'CACHED' (new trigger_type).",
+        "benefit": "Reduces API calls by estimated 30% (same symptom analyzed by multiple engineers). Faster response."
+      },
+      {
+        "id": "IMP-4",
+        "area": "MailLog Archive Strategy",
+        "current": "as_mail_logs has no archival policy. Will grow indefinitely.",
+        "proposed": "Monthly partition. Automated archive of partitions older than 12 months to a separate as_mail_logs_archive table (or compressed storage). UI shows 'load archived logs' button for older periods.",
+        "benefit": "Keeps active table under 3M rows. Queries remain fast."
+      },
+      {
+        "id": "IMP-5",
+        "area": "AI + MailLog event chain integrity",
+        "current": "When AI draft is used as email, two separate logs are created: as_ai_logs (adopted=true, adoptedAction='used_as_email') and as_mail_logs (template_id=null, content from AI). These are not explicitly linked.",
+        "proposed": "Add ai_suggestion_id column to as_mail_logs (nullable FK to as_ai_logs). When email is sent from AI draft, populate this column. This creates a direct link: AI suggestion -> MailLog -> TicketEvent chain.",
+        "benefit": "Full traceability: 'this email was generated by AI suggestion #1001, edited by user, sent as mail log #50001, recorded as EMAIL_SENT event #8801'."
+      },
+      {
+        "id": "IMP-6",
+        "area": "Export Progress Indicator",
+        "current": "Frontend shows spinner during CSV download. No progress indication for large files.",
+        "proposed": "For exports > 5000 rows, use async export pattern: POST /api/export/start returns jobId. Frontend polls GET /api/export/status/{jobId} for progress (0-100%). When complete, GET /api/export/download/{jobId}.",
+        "benefit": "Better UX for large exports. User can navigate away and return. Server manages file lifecycle."
+      }
+    ],
+
+    "db_table_summary": {
+      "new_tables_in_phase5": [
+        { "table": "as_mail_logs",     "estimated_growth": "~200K rows/month (migrated 2.6M + new)", "retention": "12 months online + archive" },
+        { "table": "as_ai_logs",       "estimated_growth": "~4K rows/month (500/day * 8 workdays avg)", "retention": "permanent (small volume)" },
+        { "table": "as_prompt_versions","estimated_growth": "~10 rows total (version tracking)", "retention": "permanent" }
+      ],
+      "existing_tables_impacted": [
+        { "table": "as_ticket_events",  "new_event_types": ["EMAIL_SENT", "SMS_SENT", "LLM_SUGGESTION_VIEWED", "FIRST_RESPONSE"], "growth_impact": "+~50K events/month from MailLog+AI" },
+        { "table": "as_tickets",        "new_columns": "none (all linkage via FK in other tables)" }
+      ],
+      "total_new_tables": 3,
+      "total_new_api_endpoints": 26
+    }
+  },
+
+  "summary": {
+    "overall_assessment": "The three Phase 5 features are well-designed, technically feasible, and correctly sequenced. The primary integration point (as_ticket_events) is sound. The recommended implementation order (MailLog → Statistics → AI) follows dependency flow and risk profile.",
+
+    "implementation_order": {
+      "step1": "MailLog (1 week) — fulfills DoD #1, unblocks DEP-1/3/4",
+      "step2": "Statistics/CSV (1.5 weeks) — fulfills dashboard, reads from MailLog, no new external deps",
+      "step3": "AI Suggestion (1.5 weeks) — fulfills DoD #2, highest risk isolated to last"
+    },
+
+    "total_effort": "~4 weeks (1 developer)",
+
+    "must_address_before_implementation": [
+      "RISK-1: Define as_mail_logs partition strategy before first production INSERT",
+      "RISK-2: Verify Tailscale VPN uptime SLA and implement health check before AI phase",
+      "TF-CSV-1: Consolidate 14 stats API endpoints to ~7 before frontend development starts",
+      "IMP-5: Add ai_suggestion_id FK to as_mail_logs DDL before table creation"
+    ],
+
+    "can_defer": [
+      "TF-AI-2: SSE streaming for Claude responses (use full response for MVP)",
+      "TF-AI-3: Prompt version management table (hash is sufficient for MVP)",
+      "TF-CSV-3: PDF export (CSV + XLSX cover 95% of needs)",
+      "IMP-6: Async export pattern (synchronous streaming works for <100K rows)"
+    ]
+  }
+}
