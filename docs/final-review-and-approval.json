@@ -1,0 +1,323 @@
+{
+  "meta": {
+    "document": "Final Review & Approval — Step 1 Requirements + Step 2 Implementation Plan",
+    "createdAt": "2026-04-29",
+    "reviewed_documents": {
+      "step1_requirements": [
+        "docs/support-pages-requirements.md (ProductRegistration + TicketAssign + Settings)",
+        "docs/as-operations-milestone-spec.json (Cost + Shipment + Recall + Exchange)",
+        "docs/customer-page-uiux-spec.json (Customer Page UI/UX)",
+        "docs/consultation-page-uiux-spec.json (Consultation Page UI/UX)",
+        "docs/bidirectional-navigation-architecture.json (Navigation)",
+        "docs/ticket-lifecycle-tracking.md (Event system)",
+        "docs/feature-requirements-detail.json (Auto-assign + Cost 3-axis + Shipment/Recall)"
+      ],
+      "step2_implementation": [
+        "docs/implementation-plan.md (6 sprints, 10 weeks, ~102 APIs, 10 DB tables)"
+      ],
+      "reference": [
+        "ROADMAP.md (Phase 2~5 DoD)",
+        "CLAUDE.md (Domain rules)",
+        "src/ (29 files, all placeholder except DashboardPage)"
+      ]
+    }
+  },
+
+  "section1_requirements_quality": {
+    "title": "(1) 요구사항 완전성·명확성·일관성",
+    "score": "88/100",
+
+    "completeness": {
+      "score": 90,
+      "assessment": "15개 페이지 중 13개에 대해 상세 요구사항 존재. 젠데스크(#3)와 교환반품 중 환불 프로세스만 미확정.",
+      "covered_pages": {
+        "detailed_spec": ["CustomerPage", "ConsultationPage", "TicketListPage", "TicketDetailPage", "CostTrackingPage", "ShipmentPage", "RecallPage", "ExchangeReturnPage", "ProductRegistrationPage", "TicketAssignPage", "MailLogPage", "StatisticsPage", "SettingsPage"],
+        "partial": ["DashboardPage (KPI 골격만)", "ReportPage (리포트 유형 정의됨)"],
+        "minimal": ["ZendeskPage (Phase 5 마이그레이션, 설계 최소)", "AiSupportPage (Phase 5 LLM)"]
+      }
+    },
+
+    "clarity": {
+      "score": 88,
+      "positives": [
+        "각 페이지마다 사용자 흐름 + UI 컴포넌트 + API 엔드포인트 + RBAC + DoD 검증 방법이 명시됨",
+        "상태 전이 다이어그램이 ASCII로 시각화되어 있어 구현자가 즉시 이해 가능",
+        "CLAUDE.md 도메인 규칙(전화번호 기준 조회, 비용 3축, MailLog 필수 등)이 각 스펙에 반영됨"
+      ],
+      "issues": [
+        "반품 환불 프로세스: 자동 vs 수동 미확정 → '환불 대기' 상태 추가 권장",
+        "VIP 등급 기준: '팀장/총괄 확정 필요'로 남아 있음 → 초기값 정의 필요"
+      ]
+    },
+
+    "consistency": {
+      "score": 86,
+      "positives": [
+        "모든 문서에서 UserRole 4종(AS_ENGINEER/CS_CX/TEAM_LEAD/ADMIN) 일관 사용",
+        "TicketStatus 8종이 ticket-lifecycle, milestone-ticket-spec, as-operations-milestone-spec 간 일치",
+        "API 경로 패턴(/api/{domain}/{id}/{sub-resource}) 전 문서 동일"
+      ],
+      "issues": [
+        "assign endpoint: POST vs PATCH 불일치 (일부 문서에서 상이). PATCH로 통일 합의됨.",
+        "MailLog Phase 배치: Phase 5이지만 Phase 4 Recall SMS에서 필요. implementation-plan에서 Sprint 2 선행으로 해결.",
+        "as_tickets DDL이 implementation-plan.md에 정의됨으로 해결. 다른 문서에서는 여전히 참조만."
+      ]
+    }
+  },
+
+  "section2_implementation_feasibility": {
+    "title": "(2) 구현 계획 기술적 타당성 및 실현 가능성",
+    "score": "85/100",
+
+    "architecture": {
+      "score": 90,
+      "assessment": "React 19 + Vite 8 + TS 6 + Tailwind 4 + Electron 41은 최신 안정 스택. zustand + react-query 조합은 12명 규모에 최적.",
+      "key_decisions": [
+        { "decision": "createHashRouter", "verdict": "CORRECT — Electron file:// 호환 유일한 방법" },
+        { "decision": "zustand + react-query (not Redux)", "verdict": "CORRECT — 규모에 적합, boilerplate 최소" },
+        { "decision": "인메모리 토큰 + zustand persist", "verdict": "ACCEPTABLE — localStorage XSS 위험 회피. persist는 새로고침 대응" },
+        { "decision": "union type + as const (not enum)", "verdict": "CORRECT — TS 6.x erasableSyntaxOnly 필수" }
+      ]
+    },
+
+    "schedule_realism": {
+      "score": 78,
+      "assessment": "10주(1인)는 TIGHT but achievable. Sprint 0(1.5주)에 17개 태스크는 집중 필요. Sprint 1 TicketDetailPage(16h)는 낙관적 → 20h+ 예상.",
+      "adjustments_needed": [
+        "Sprint 0: UI 공통 8종(12h) → 실제 16h+ 예상. P0 6종만 Sprint 0, 나머지 Sprint 1에서",
+        "Sprint 1: TicketDetailPage(16h) → 20h. 18개 sub-component 포함.",
+        "Sprint 5: 테스트 + QA + 버그 수정(40h) → 충분하나, E2E 환경 구축에 추가 4h",
+        "총 조정: 10주 → 11주 (1주 추가 버퍼)"
+      ]
+    },
+
+    "dependency_management": {
+      "score": 85,
+      "assessment": "MSW 목 핸들러로 Spring 백엔드 독립 개발 가능. Critical path가 명확히 정의됨.",
+      "risk": "MSW 목 데이터가 실제 Spring 응답과 다를 경우 통합 시 수정 비용 발생"
+    },
+
+    "component_reusability": {
+      "score": 90,
+      "assessment": "14개 공통 UI 컴포넌트가 7개 이상 페이지에서 재사용됨 (DataTable, FilterBar, Pagination, StatusBadge, Modal, Tabs, KpiCard). DRY 원칙 준수."
+    }
+  },
+
+  "section3_roadmap_alignment": {
+    "title": "(3) ROADMAP.md 정렬 및 Phase 간 연계",
+    "score": "90/100",
+
+    "phase_mapping": [
+      {
+        "phase": "Phase 2",
+        "roadmap_dod": ["Electron 로그인 후 고객 조회", "모바일 동일 기능"],
+        "sprint": "Sprint 0 (1.5주)",
+        "coverage": "FULL — LoginPage + CustomerPage + hashRouter + responsive",
+        "score": 95
+      },
+      {
+        "phase": "Phase 3",
+        "roadmap_dod": ["접수→처리→완료 E2E", "비용 3축 합산 정확"],
+        "sprint": "Sprint 1 + 2 (3.5주)",
+        "coverage": "FULL — Ticket CRUD + Stepper + Cost 3-axis + TicketAssign",
+        "score": 92
+      },
+      {
+        "phase": "Phase 4",
+        "roadmap_dod": ["출고 CX 인계", "미회수 필터링", "교환반품 재고 갱신"],
+        "sprint": "Sprint 3 (1.5주)",
+        "coverage": "FULL — Shipment + Recall + Exchange/Return + Registration",
+        "score": 85,
+        "note": "재고 시스템 API 미확인으로 DoD-4 '재고 갱신' 확정 불가"
+      },
+      {
+        "phase": "Phase 5",
+        "roadmap_dod": ["MailLog 자동 생성", "LLM 제안 표시", "Electron+모바일 QA"],
+        "sprint": "Sprint 4 + 5 (3.5주)",
+        "coverage": "FULL — MailLog + AI + Stats + Reports + Settings + QA",
+        "score": 90
+      }
+    ],
+
+    "cross_phase_linkage": {
+      "assessment": "Phase 간 데이터 흐름이 명확. MailLog Sprint 2 선행 배치로 Phase 4 Recall SMS 커버.",
+      "remaining_gap": "Phase 4 → Phase 5 연결: Recall COMPLETED(grade) → Exchange/Return 검수 자동 전이 트리거가 Spring @EventListener인지 명시 필요"
+    }
+  },
+
+  "section4_user_goal_achievability": {
+    "title": "(4) 사용자 Goal 달성 가능성",
+    "score": "87/100",
+
+    "goals": [
+      {
+        "goal": "시리얼 조회·정품등록 플로우",
+        "achievable": true,
+        "evidence": [
+          "SerialVerifyBar: 시리얼 입력 → GET /api/serials/verify → 정상/중복/위변조/미등록 즉시 판별",
+          "정품등록 → 보증만료 자동 산정 (purchase_date + warranty_months)",
+          "쿠폰 자동 발급: REGISTERED 전이 시 @TransactionalEventListener → coupon 생성",
+          "블랙리스트: 동일 시리얼 2회 등록 → UNIQUE 제약 + 경고 → 팀장 승인"
+        ],
+        "risk": "쿠폰 유효 기간 정책 미확정 (6개월? 12개월?) → 초기값 설정 후 SettingsPage에서 변경 가능하게"
+      },
+      {
+        "goal": "자동 배정 토글 ON/OFF",
+        "achievable": true,
+        "evidence": [
+          "AutoAssignBanner: 대형 토글 (64x32px) + 확인 다이얼로그",
+          "PUT /api/assignment-rules { enabled: true/false } → ADMIN only",
+          "ON→OFF: 즉시 중지, 신규 미배정. OFF→ON: 신규부터 적용, 소급 안 함",
+          "라운드로빈 알고리즘 46줄 pseudocode 정의 + SERIALIZABLE 격리",
+          "Sidebar footer '자동 배정 ON/OFF' 실시간 반영 (react-query invalidation)"
+        ],
+        "risk": "LEAST_LOADED, CAPABILITY_MATCH 모드는 알고리즘 미정의 → ROUND_ROBIN만 구현, 나머지 'Coming Soon'"
+      },
+      {
+        "goal": "권한 변경 즉시 반영",
+        "achievable": true,
+        "evidence": [
+          "SettingsPage 사용자 탭: PATCH /api/users/{id} { role: 'TEAM_LEAD' }",
+          "JWT에 role 포함 → 역할 변경 시 서버에서 기존 refresh token 삭제 → 다음 API 호출 시 401 → 자동 re-login → 새 JWT에 새 role",
+          "RequireAuth + Can 컴포넌트가 user.role 기반으로 즉시 UI 분기"
+        ],
+        "risk": "역할 변경 후 기존 JWT 무효화 메커니즘이 Spring 측에서 구현되어야 함. 프론트엔드만으로는 불가."
+      }
+    ]
+  },
+
+  "section5_risks_and_dependencies": {
+    "title": "(5) 잠재적 리스크 및 기술적 의존성",
+    "score": "80/100",
+
+    "risks_ranked": [
+      {
+        "rank": 1,
+        "risk": "Spring 백엔드 가용성",
+        "severity": "CRITICAL",
+        "probability": "HIGH",
+        "impact": "Sprint 1~4 프론트엔드 차단",
+        "mitigation": "MSW 목 핸들러 ~70 endpoints (8~12h 투자)",
+        "status": "계획됨 (Sprint 0 task 0-17)"
+      },
+      {
+        "rank": 2,
+        "risk": "재고 시스템 API 미확인",
+        "severity": "HIGH",
+        "probability": "HIGH",
+        "impact": "Phase 4 DoD-4 '교환반품 재고 갱신' 달성 불확실",
+        "mitigation": "Sprint 3 시작 전 Spring 팀 확인. Mock API 우선 구현.",
+        "status": "미해결 — BLOCKER"
+      },
+      {
+        "rank": 3,
+        "risk": "Electron CORS + Hash Router",
+        "severity": "HIGH",
+        "probability": "CERTAIN",
+        "impact": "Electron 프로덕션 라우팅 + API 호출 실패",
+        "mitigation": "createHashRouter 확정 + Spring CORS origin 'null' 허용",
+        "status": "계획됨 (Sprint 0 task 0-4)"
+      },
+      {
+        "rank": 4,
+        "risk": "일정 초과 (10주 → 실제 11~12주)",
+        "severity": "MEDIUM",
+        "probability": "HIGH",
+        "impact": "Phase 5 지연",
+        "mitigation": "Phase 5 MailLog/AI/Stats를 MVP 수준으로 축소 가능. DnD 배정은 후순위.",
+        "status": "버퍼 1주 포함 (총 11주)"
+      },
+      {
+        "rank": 5,
+        "risk": "TS 6 + 신규 라이브러리 호환",
+        "severity": "MEDIUM",
+        "probability": "MEDIUM",
+        "impact": "Sprint 0에서 1~2일 디버깅",
+        "mitigation": "설치 직후 tsc --noEmit. skipLibCheck: true 이미 설정",
+        "status": "대비됨"
+      }
+    ],
+
+    "technical_dependencies": [
+      { "from": "Frontend apiClient", "to": "Spring Boot API", "type": "HTTP/REST", "risk": "CORS + 인증" },
+      { "from": "Electron main.cjs", "to": "Vite dev server (dev) / dist/ (prod)", "type": "loadURL / loadFile", "risk": "hash router 필수" },
+      { "from": "AI Suggestion", "to": "Local Claude API (Tailscale VPN)", "type": "HTTP via Spring proxy", "risk": "VPN 단일 장애점" },
+      { "from": "MailLog", "to": "기존 SMTP + SMS 게이트웨이", "type": "재사용", "risk": "공유 인프라 가용성" },
+      { "from": "Exchange/Return", "to": "기존 재고 시스템", "type": "미확인 API", "risk": "BLOCKER" }
+    ]
+  },
+
+  "section6_improvements": {
+    "title": "(6) 개선 제안 및 추가 고려사항",
+
+    "improvements": [
+      {
+        "id": "IMP-1",
+        "area": "Sprint 0 범위 축소",
+        "suggestion": "공통 UI 14종을 8종으로 축소 (Timeline, Stepper, SidePanel, ProgressBar, Toggle, FileUpload를 Sprint 1에서 필요 시점에 생성). Sprint 0 리스크 감소.",
+        "effort_saved": "6h (Sprint 0에서 Sprint 1로 이동)"
+      },
+      {
+        "id": "IMP-2",
+        "area": "MSW 목 핸들러 자동 생성",
+        "suggestion": "기존 설계 문서(backend-api-and-schema.json)의 API response example을 파싱하여 MSW 핸들러 스켈레톤 자동 생성. 수동 작성 8h → 자동 2h + 수동 검증 2h.",
+        "effort_saved": "4h"
+      },
+      {
+        "id": "IMP-3",
+        "area": "Phase 5 MVP 전략",
+        "suggestion": "MailLog: 발송+기록만 (재발송/통계 제외). AI: SYMPTOM_ANALYSIS만 (RESPONSE_DRAFT/SIMILAR_CASES 제외). Stats: KPI 4종만 (차트/액션큐 제외). 이렇게 하면 Sprint 4를 1.5주로 축소 가능.",
+        "effort_saved": "~20h (Sprint 4: 2주 → 1.5주)"
+      },
+      {
+        "id": "IMP-4",
+        "area": "테스트 선행 전략",
+        "suggestion": "Sprint 5에 테스트 몰아넣지 말고, 각 Sprint에서 해당 기능 테스트 함께 작성. Sprint 0: apiClient 테스트, Sprint 1: ticket CRUD 테스트. 버그 조기 발견.",
+        "effort_impact": "총 시간 동일, 분산 배치"
+      },
+      {
+        "id": "IMP-5",
+        "area": "환불 프로세스 결정",
+        "suggestion": "반품 완료 시 환불을 '환불 대기' 상태로 추가. 별도 환불 승인 UI 없이 ExchangeReturn status에 'REFUND_PENDING' → 'REFUND_COMPLETED' 2단계 추가. 팀장이 [환불 확인] 클릭으로 완료.",
+        "impact": "ExchangeReturn 상태 6→8개 증가. API 1개 추가 (PATCH /exchanges/{id}/refund)"
+      },
+      {
+        "id": "IMP-6",
+        "area": "Electron 개발 우선순위",
+        "suggestion": "Sprint 0~4는 웹 브라우저에서 개발. Electron 빌드는 Sprint 5에서 한 번에 검증. 매 Sprint마다 Electron 테스트는 시간 낭비. hashRouter이므로 웹과 Electron 동작 동일.",
+        "effort_saved": "각 Sprint에서 0.5h씩 절약 (총 2.5h)"
+      }
+    ],
+
+    "additional_considerations": [
+      "접근성(a11y): 모든 interactive element에 aria-label. 키보드 탐색. 이미 설계됨 (ConsultationPage 키보드 단축키).",
+      "국제화(i18n): 현재 한국어 only. 향후 영어 추가 시 i18next 도입 검토. 현재 label 상수 패턴(TICKET_STATUS_LABELS)이 i18n key로 전환 용이.",
+      "오프라인 대응: Electron에서 네트워크 끊김 시 apiClient가 NETWORK_ERROR 반환. Toast로 안내. 오프라인 캐시는 범위 외.",
+      "모니터링: Spring 측 API 응답 시간 로그. 프론트엔드 에러는 console.error만 (Sentry 등 외부 서비스 미사용)."
+    ]
+  },
+
+  "verdict": {
+    "title": "최종 판정",
+
+    "scores_summary": {
+      "requirements_quality": { "score": 88, "grade": "A-" },
+      "implementation_feasibility": { "score": 85, "grade": "B+" },
+      "roadmap_alignment": { "score": 90, "grade": "A-" },
+      "user_goal_achievability": { "score": 87, "grade": "B+" },
+      "risk_management": { "score": 80, "grade": "B" },
+      "overall_weighted": { "score": 86, "grade": "B+" }
+    },
+
+    "approval_status": "APPROVED WITH CONDITIONS",
+
+    "conditions": [
+      "C-1: Sprint 0 시작 전 createHashRouter 전환 확정 및 구현 (2h)",
+      "C-2: Sprint 3 시작 전 재고 시스템 API 스펙 Spring 팀과 확인 (미확인 시 Mock API)",
+      "C-3: Sprint 2에서 MailLog 기본 발송 기능 선행 구현 (Phase 4 Recall SMS 대비)",
+      "C-4: 반품 환불 프로세스 확정 (자동/수동/환불 대기 상태 추가)"
+    ],
+
+    "final_statement": "Step 1의 요구사항(22개 설계 문서, ~500KB)과 Step 2의 구현 계획(6 Sprint, 10주, ~102 API)은 ROADMAP Phase 2~5 전체를 포괄적으로 다루고 있으며, 4개 GoD + 7개 ROADMAP DoD를 충족하는 기술 경로가 명확합니다. 주요 리스크(Spring 가용성, 재고 API, Electron 라우팅)에 대한 완화 전략이 수립되어 있으며, 조건 4건 해결 시 구현에 착수할 수 있습니다. 예상 일정: 11주 (10주 + 1주 버퍼)."
+  }
+}
