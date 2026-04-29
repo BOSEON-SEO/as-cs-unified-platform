@@ -1,0 +1,573 @@
+{
+  "meta": {
+    "document": "Email/SMS Sending & MailLog Design",
+    "phase": "Phase 5 (ROADMAP.md)",
+    "createdAt": "2026-04-29",
+    "core_rules": [
+      "이메일·SMS 발송 시 반드시 MailLog 기록 (CLAUDE.md 도메인 규칙)",
+      "알림 채널: 기존 어드민 SMTP, SMS(알림톡), 택배사 API 재사용 (CLAUDE.md 아키텍처)",
+      "LLM 자동 답변은 suggestion 형태만, 자동 발송 절대 금지 (CLAUDE.md)"
+    ],
+    "existing_infra": "기존 어드민 SMTP 서버 + SMS/알림톡 게이트웨이 재사용"
+  },
+
+  "section1_architecture": {
+    "title": "(1) Email/SMS Sending Service Architecture",
+
+    "overview_diagram": [
+      "┌─────────────────────────────────────────────────────────────────────┐",
+      "│                    Frontend (React)                                │",
+      "│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐ │",
+      "│  │ 이메일 작성   │  │ SMS 작성     │  │ 시스템 자동 트리거         │ │",
+      "│  │ 모달          │  │ 모달         │  │ (출고·회수·배정·종료 등)    │ │",
+      "│  └──────┬───────┘  └──────┬───────┘  └────────────┬──────────────┘ │",
+      "│         │                  │                       │               │",
+      "│         └──────────────────┼───────────────────────┘               │",
+      "│                           │                                       │",
+      "│              POST /api/messages/send                               │",
+      "└───────────────────────────┼───────────────────────────────────────┘",
+      "                           │",
+      "                           v",
+      "┌───────────────────────────────────────────────────────────────────┐",
+      "│                  Spring Boot (MessageService)                     │",
+      "│                                                                   │",
+      "│  1. Validate request (channel, recipient, content)                │",
+      "│  2. INSERT as_mail_logs (status=PENDING)                          │",
+      "│  3. Resolve channel adapter:                                      │",
+      "│     ┌──────────┐  ┌──────────┐  ┌──────────┐                     │",
+      "│     │EmailSender│  │SmsSender │  │AlimtalkSe│                     │",
+      "│     │(SMTP)     │  │(Gateway) │  │nder(KT)  │                     │",
+      "│     └─────┬─────┘  └─────┬────┘  └─────┬────┘                     │",
+      "│           │              │              │                         │",
+      "│  4. Send via external service                                     │",
+      "│  5. UPDATE as_mail_logs (status=SENT/FAILED, error_detail)        │",
+      "│  6. IF ticket_id: INSERT as_ticket_events (EMAIL_SENT/SMS_SENT)   │",
+      "│  7. IF first outbound on ticket: INSERT FIRST_RESPONSE event      │",
+      "│                                                                   │",
+      "└───────────────────────────────────────────────────────────────────┘",
+      "           │              │              │",
+      "           v              v              v",
+      "     ┌──────────┐  ┌──────────┐  ┌──────────┐",
+      "     │SMTP Server│  │SMS GW    │  │알림톡 API │",
+      "     │(existing) │  │(existing)│  │(KT/NHN)  │",
+      "     └──────────┘  └──────────┘  └──────────┘"
+    ],
+
+    "channel_adapters": {
+      "description": "Strategy pattern: MessageService delegates to channel-specific adapters",
+
+      "EMAIL": {
+        "adapter": "EmailSenderAdapter",
+        "transport": "JavaMailSender (Spring Boot Starter Mail)",
+        "config": {
+          "host": "기존 어드민 SMTP 서버 (application.yml: spring.mail.*)",
+          "port": 587,
+          "auth": true,
+          "starttls": true,
+          "from": "as-support@tbnws.com"
+        },
+        "features": [
+          "HTML 이메일 (Thymeleaf 템플릿)",
+          "첨부 파일 지원 (MultipartFile)",
+          "Reply-To 헤더 설정 (담당자 이메일)"
+        ],
+        "templates": [
+          { "id": "TPL_AS_RECEIVED",     "name": "A/S 접수 안내",     "trigger": "TICKET_CREATED" },
+          { "id": "TPL_AS_PROGRESS",     "name": "수리 진행 안내",    "trigger": "WORK_STARTED" },
+          { "id": "TPL_AS_COMPLETED",    "name": "수리 완료 안내",    "trigger": "TICKET_CLOSED" },
+          { "id": "TPL_SHIPMENT_OUT",    "name": "출고 발송 안내",    "trigger": "SHIPMENT_DISPATCHED" },
+          { "id": "TPL_COST_ESTIMATE",   "name": "비용 견적 안내",    "trigger": "manual" },
+          { "id": "TPL_CUSTOM",          "name": "자유 작성",         "trigger": "manual" }
+        ]
+      },
+
+      "SMS": {
+        "adapter": "SmsSenderAdapter",
+        "transport": "HTTP POST to existing SMS gateway API",
+        "config": {
+          "gateway_url": "기존 어드민 SMS API (tbnws_send_sms_result 테이블 연동)",
+          "api_key": "application.yml: sms.api-key (encrypted)",
+          "sender_number": "1588-XXXX (발신 번호)",
+          "max_length": 90
+        },
+        "features": [
+          "90자 초과 시 LMS 자동 전환",
+          "발신번호 사전 등록 필수 (KISA 규정)",
+          "수신 거부 번호 자동 차단"
+        ]
+      },
+
+      "ALIMTALK": {
+        "adapter": "AlimtalkSenderAdapter",
+        "transport": "HTTP POST to KakaoTalk Alimtalk API (NHN Cloud or direct KT)",
+        "config": {
+          "api_url": "기존 어드민 알림톡 API",
+          "sender_key": "application.yml: alimtalk.sender-key",
+          "channel_id": "tbnws-as-support"
+        },
+        "features": [
+          "사전 등록된 템플릿만 발송 가능 (카카오 심사)",
+          "대체 발송: 알림톡 실패 시 SMS로 자동 fallback",
+          "버튼 링크 (티켓 상세, 택배 추적 등)"
+        ],
+        "templates": [
+          { "id": "ALT_AS_RECEIVED",     "name": "A/S 접수 완료",     "buttons": [{ "name": "접수 확인", "url": "https://..." }] },
+          { "id": "ALT_SHIPMENT_TRACK",  "name": "배송 출발 안내",    "buttons": [{ "name": "배송 추적", "url": "{trackingUrl}" }] },
+          { "id": "ALT_PICKUP_SCHEDULE", "name": "회수 방문 예정",    "buttons": [] },
+          { "id": "ALT_AS_COMPLETED",    "name": "수리 완료 안내",    "buttons": [{ "name": "결과 확인", "url": "https://..." }] }
+        ]
+      }
+    },
+
+    "send_triggers": {
+      "manual": {
+        "description": "User explicitly composes and sends a message from UI",
+        "entry_points": [
+          "TicketDetailPage 액션바: [📧 이메일] / [📱 SMS] 버튼 -> 작성 모달",
+          "MailLogPage: [재발송] 버튼",
+          "AI ResponseDraft: [📧 이메일로 사용] -> 이메일 작성 모달 (AI 초안 pre-fill)"
+        ],
+        "flow": "User fills modal -> clicks [발송] -> POST /api/messages/send -> MailLog + TicketEvent"
+      },
+
+      "system_auto": {
+        "description": "System automatically sends notification on certain events",
+        "triggers": [
+          { "event": "TICKET_CREATED",       "channels": ["ALIMTALK", "SMS (fallback)"], "template": "ALT_AS_RECEIVED",   "recipient": "customer phone" },
+          { "event": "ENGINEER_ASSIGNED",    "channels": ["EMAIL"],                       "template": "internal only (to engineer)", "recipient": "assignee email" },
+          { "event": "SHIPMENT_DISPATCHED",  "channels": ["ALIMTALK", "SMS (fallback)"], "template": "ALT_SHIPMENT_TRACK","recipient": "customer phone" },
+          { "event": "PICKUP_SCHEDULED",     "channels": ["SMS"],                         "template": "driver SMS",        "recipient": "driver phone" },
+          { "event": "TICKET_CLOSED",        "channels": ["ALIMTALK", "SMS (fallback)"], "template": "ALT_AS_COMPLETED",  "recipient": "customer phone (opt-in)" },
+          { "event": "COST_REJECTED",        "channels": ["EMAIL"],                       "template": "internal (to creator)","recipient": "cost creator email" }
+        ],
+        "opt_in": "TICKET_CLOSED notification is opt-in (closure modal checkbox 'notifyCustomer')",
+        "implementation": "Spring @TransactionalEventListener on TicketEvent creation"
+      }
+    },
+
+    "retry_strategy": {
+      "auto_retry": {
+        "max_attempts": 3,
+        "delays": ["immediate", "after 5 min", "after 30 min"],
+        "implementation": "Spring @Retryable or custom retry with exponential backoff",
+        "on_final_failure": "Status -> FAILED, error_detail recorded, visible in MailLog failed queue"
+      },
+      "manual_retry": {
+        "trigger": "User clicks [재발송] button on MailLogPage",
+        "behavior": "Creates NEW MailLog row (parent_log_id points to original). Does NOT modify original row.",
+        "modify_and_retry": "User clicks [수신자 수정 후 재발송] -> change recipient -> send as new MailLog"
+      },
+      "alimtalk_fallback": {
+        "behavior": "If Alimtalk fails (user not on KakaoTalk), automatically send same content as SMS",
+        "logging": "Two MailLog rows: original ALIMTALK (FAILED) + fallback SMS (SENT). parent_log_id links them."
+      }
+    }
+  },
+
+  "section2_db_schema": {
+    "title": "(2) MailLog Table Schema",
+
+    "table": {
+      "name": "as_mail_logs",
+      "description": "Every email/SMS/alimtalk send attempt is logged here. Core domain entity per CLAUDE.md. Never deleted, only appended.",
+      "ddl": [
+        "CREATE TABLE as_mail_logs (",
+        "  log_id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,",
+        "  parent_log_id    BIGINT UNSIGNED NULL COMMENT 'FK to self. Non-null for resend/fallback, points to original send attempt',",
+        "",
+        "  -- Channel & recipient",
+        "  channel          ENUM('EMAIL','SMS','ALIMTALK') NOT NULL,",
+        "  recipient_type   ENUM('CUSTOMER','ENGINEER','DRIVER','TEAM_LEAD','SYSTEM') NOT NULL DEFAULT 'CUSTOMER',",
+        "  recipient_name   VARCHAR(100) NULL,",
+        "  recipient_email  VARCHAR(200) NULL COMMENT 'Non-null when channel=EMAIL',",
+        "  recipient_phone  VARCHAR(20) NULL COMMENT 'Non-null when channel=SMS or ALIMTALK',",
+        "",
+        "  -- Content",
+        "  subject          VARCHAR(300) NULL COMMENT 'Email subject. NULL for SMS/ALIMTALK',",
+        "  content_text     TEXT NOT NULL COMMENT 'Plain text body (SMS content or email text fallback)',",
+        "  content_html     MEDIUMTEXT NULL COMMENT 'HTML body for EMAIL. NULL for SMS/ALIMTALK',",
+        "  template_id      VARCHAR(50) NULL COMMENT 'Template ID used (TPL_* or ALT_*). NULL for freeform',",
+        "  template_params  JSON NULL COMMENT 'Key-value pairs substituted into template',",
+        "",
+        "  -- Context",
+        "  ticket_id        BIGINT UNSIGNED NULL COMMENT 'FK to as_tickets. NULL for non-ticket messages',",
+        "  ticket_no        VARCHAR(20) NULL COMMENT 'Denormalized ticket number for quick display',",
+        "  trigger_type     ENUM('MANUAL','SYSTEM_AUTO','RESEND','ALIMTALK_FALLBACK') NOT NULL DEFAULT 'MANUAL',",
+        "",
+        "  -- Delivery status",
+        "  status           ENUM('PENDING','SENT','DELIVERED','FAILED','CANCELLED') NOT NULL DEFAULT 'PENDING',",
+        "  error_code       VARCHAR(50) NULL COMMENT 'Gateway error code (e.g., R-401, SMTP 550)',",
+        "  error_detail     VARCHAR(500) NULL COMMENT 'Human-readable error message',",
+        "  retry_count      TINYINT UNSIGNED NOT NULL DEFAULT 0,",
+        "  max_retries      TINYINT UNSIGNED NOT NULL DEFAULT 3,",
+        "",
+        "  -- External references",
+        "  external_msg_id  VARCHAR(100) NULL COMMENT 'Message ID from SMS gateway or SMTP server',",
+        "",
+        "  -- Who sent it",
+        "  sent_by          BIGINT UNSIGNED NULL COMMENT 'FK to users. NULL for SYSTEM_AUTO',",
+        "  sent_by_name     VARCHAR(50) NULL,",
+        "",
+        "  -- Timestamps",
+        "  created_at       DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),",
+        "  sent_at          DATETIME(3) NULL COMMENT 'When actually sent to gateway',",
+        "  delivered_at     DATETIME(3) NULL COMMENT 'Delivery receipt timestamp (if available)',",
+        "  failed_at        DATETIME(3) NULL,",
+        "",
+        "  -- Indexes",
+        "  INDEX idx_ml_ticket (ticket_id, created_at),",
+        "  INDEX idx_ml_channel (channel, status, created_at),",
+        "  INDEX idx_ml_recipient_email (recipient_email, created_at),",
+        "  INDEX idx_ml_recipient_phone (recipient_phone, created_at),",
+        "  INDEX idx_ml_status (status, created_at),",
+        "  INDEX idx_ml_sent_by (sent_by, created_at),",
+        "  INDEX idx_ml_parent (parent_log_id),",
+        "",
+        "  -- Foreign keys",
+        "  CONSTRAINT fk_ml_ticket FOREIGN KEY (ticket_id) REFERENCES as_tickets(ticket_id),",
+        "  CONSTRAINT fk_ml_sender FOREIGN KEY (sent_by) REFERENCES users(id),",
+        "  CONSTRAINT fk_ml_parent FOREIGN KEY (parent_log_id) REFERENCES as_mail_logs(log_id)",
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
+      ]
+    },
+
+    "status_state_machine": {
+      "states": [
+        { "value": "PENDING",   "label": "대기",     "badge": "b-slate",  "description": "MailLog created, send not yet attempted" },
+        { "value": "SENT",      "label": "성공",     "badge": "b-green",  "description": "Successfully sent to gateway (accepted)" },
+        { "value": "DELIVERED", "label": "수신확인", "badge": "b-green",  "description": "Delivery receipt confirmed (email/alimtalk only)" },
+        { "value": "FAILED",   "label": "실패",     "badge": "b-red",    "description": "All retry attempts exhausted" },
+        { "value": "CANCELLED","label": "취소",     "badge": "b-amber",  "description": "Cancelled before sending (rare)" }
+      ],
+      "transitions": [
+        { "from": "PENDING",   "to": "SENT",      "trigger": "Gateway returns success" },
+        { "from": "PENDING",   "to": "PENDING",   "trigger": "Gateway returns error, retry_count < max_retries (increment retry_count, schedule next attempt)" },
+        { "from": "PENDING",   "to": "FAILED",    "trigger": "Gateway returns error, retry_count >= max_retries" },
+        { "from": "PENDING",   "to": "CANCELLED", "trigger": "Manual cancel before send" },
+        { "from": "SENT",      "to": "DELIVERED", "trigger": "Delivery receipt webhook (optional, channel-dependent)" },
+        { "from": "SENT",      "to": "FAILED",    "trigger": "Bounce notification (email) or delivery failure callback (SMS)" }
+      ]
+    },
+
+    "parent_log_id_usage": {
+      "resend": "When user resends a failed message: new MailLog row with parent_log_id = original log_id. Original stays FAILED.",
+      "alimtalk_fallback": "When alimtalk fails and SMS fallback fires: SMS row has parent_log_id = alimtalk row's log_id.",
+      "chain": "Multiple resends create a chain: original(FAILED) <- resend1(FAILED) <- resend2(SENT). Query: SELECT * FROM as_mail_logs WHERE log_id = :id OR parent_log_id = :id"
+    }
+  },
+
+  "section3_auto_logging": {
+    "title": "(3) Auto-Logging Mechanism on Send Completion",
+
+    "principle": "Every message send operation MUST create a MailLog record BEFORE attempting delivery. The log is created in PENDING status, then updated to SENT/FAILED after delivery. This guarantees no send can happen without a log, per CLAUDE.md domain rule.",
+
+    "sequence_diagram": [
+      "Frontend                    Spring Boot                     External Gateway",
+      "   |                            |                               |",
+      "   | POST /api/messages/send    |                               |",
+      "   | { channel, recipient,      |                               |",
+      "   |   content, ticketId? }     |                               |",
+      "   |--------------------------->|                               |",
+      "   |                            |                               |",
+      "   |                    [1] Validate request                    |",
+      "   |                    [2] INSERT as_mail_logs                 |",
+      "   |                        (status=PENDING, retry=0)          |",
+      "   |                    [3] Resolve channel adapter             |",
+      "   |                            |                               |",
+      "   |                            |--- send(message) ----------->|",
+      "   |                            |                               |",
+      "   |                            |<-- 200 OK / error ------------|",
+      "   |                            |                               |",
+      "   |                    [4a] If success:                        |",
+      "   |                        UPDATE as_mail_logs                 |",
+      "   |                          SET status=SENT,                  |",
+      "   |                              sent_at=NOW(),                |",
+      "   |                              external_msg_id=xxx           |",
+      "   |                                                            |",
+      "   |                    [4b] If error + retry_count < max:      |",
+      "   |                        UPDATE retry_count++                 |",
+      "   |                        Schedule retry (5min / 30min)       |",
+      "   |                                                            |",
+      "   |                    [4c] If error + retry_count >= max:     |",
+      "   |                        UPDATE status=FAILED,               |",
+      "   |                          error_code, error_detail,         |",
+      "   |                          failed_at=NOW()                   |",
+      "   |                                                            |",
+      "   |                    [5] IF ticket_id IS NOT NULL:           |",
+      "   |                        INSERT as_ticket_events             |",
+      "   |                          (EMAIL_SENT or SMS_SENT)          |",
+      "   |                          payload: { mailLogId, subject }   |",
+      "   |                                                            |",
+      "   |                    [6] FIRST_RESPONSE auto-detect:        |",
+      "   |                        IF this is the first outbound      |",
+      "   |                        comm on this ticket:                |",
+      "   |                        INSERT as_ticket_events             |",
+      "   |                          (FIRST_RESPONSE)                  |",
+      "   |                                                            |",
+      "   |<--- 200 { logId, status } --|                              |",
+      "   |                            |                               |"
+    ],
+
+    "spring_implementation": {
+      "service_class": "MessageService",
+
+      "send_method_pseudocode": [
+        "@Transactional",
+        "public SendResult send(SendRequest request) {",
+        "",
+        "  // 1. Validate",
+        "  validateRequest(request);",
+        "",
+        "  // 2. Create MailLog FIRST (before any send attempt)",
+        "  MailLog log = MailLog.builder()",
+        "    .channel(request.channel)",
+        "    .recipientType(request.recipientType)",
+        "    .recipientName(request.recipientName)",
+        "    .recipientEmail(request.recipientEmail)",
+        "    .recipientPhone(request.recipientPhone)",
+        "    .subject(request.subject)",
+        "    .contentText(request.contentText)",
+        "    .contentHtml(request.contentHtml)",
+        "    .templateId(request.templateId)",
+        "    .templateParams(request.templateParams)",
+        "    .ticketId(request.ticketId)",
+        "    .ticketNo(request.ticketNo)",
+        "    .triggerType(request.triggerType)",
+        "    .sentBy(request.sentBy)",
+        "    .sentByName(request.sentByName)",
+        "    .status(MailLogStatus.PENDING)",
+        "    .build();",
+        "  log = mailLogRepository.save(log);  // INSERT with PENDING",
+        "",
+        "  // 3. Attempt send via channel adapter",
+        "  try {",
+        "    ChannelAdapter adapter = adapterFactory.get(request.channel);",
+        "    ExternalResult result = adapter.send(log);",
+        "",
+        "    // 4a. Success",
+        "    log.setStatus(MailLogStatus.SENT);",
+        "    log.setSentAt(Instant.now());",
+        "    log.setExternalMsgId(result.messageId());",
+        "    mailLogRepository.save(log);",
+        "",
+        "  } catch (SendException e) {",
+        "    log.setRetryCount(log.getRetryCount() + 1);",
+        "    if (log.getRetryCount() < log.getMaxRetries()) {",
+        "      // 4b. Retry scheduled",
+        "      retryScheduler.schedule(log.getLogId(), retryDelay(log.getRetryCount()));",
+        "    } else {",
+        "      // 4c. Final failure",
+        "      log.setStatus(MailLogStatus.FAILED);",
+        "      log.setErrorCode(e.getCode());",
+        "      log.setErrorDetail(e.getMessage());",
+        "      log.setFailedAt(Instant.now());",
+        "    }",
+        "    mailLogRepository.save(log);",
+        "  }",
+        "",
+        "  // 5. Link to ticket event (if ticket-scoped)",
+        "  if (log.getTicketId() != null && log.getStatus() == MailLogStatus.SENT) {",
+        "    ticketEventService.logCommunication(log);",
+        "  }",
+        "",
+        "  return SendResult.from(log);",
+        "}"
+      ],
+
+      "ticket_event_linking": {
+        "method": "ticketEventService.logCommunication(MailLog log)",
+        "logic": [
+          "1. Determine event_type based on channel: EMAIL->EMAIL_SENT, SMS/ALIMTALK->SMS_SENT",
+          "2. Build payload: { mailLogId: log.logId, subject: log.subject }",
+          "3. INSERT as_ticket_events (ticket_id, event_type, actor_id=log.sentBy, payload)",
+          "4. FIRST_RESPONSE auto-detect:",
+          "     SELECT COUNT(*) FROM as_ticket_events",
+          "     WHERE ticket_id = log.ticketId",
+          "       AND event_type IN ('EMAIL_SENT','SMS_SENT','PHONE_CALL_LOGGED')",
+          "       AND actor_role != 'CUSTOMER'",
+          "       AND event_id < current_event_id",
+          "     If count == 0:",
+          "       INSERT as_ticket_events (FIRST_RESPONSE, payload={channel, messageId=log.logId})"
+        ]
+      },
+
+      "system_auto_trigger": {
+        "implementation": "@TransactionalEventListener on TicketEvent domain events",
+        "example": [
+          "@TransactionalEventListener",
+          "public void onTicketCreated(TicketCreatedEvent event) {",
+          "  Customer customer = customerService.getById(event.customerId());",
+          "  SendRequest req = SendRequest.systemAuto()",
+          "    .channel(Channel.ALIMTALK)",
+          "    .recipientPhone(customer.phone())",
+          "    .templateId('ALT_AS_RECEIVED')",
+          "    .templateParams(Map.of('ticketNo', event.ticketNo(), 'productModel', event.productModel()))",
+          "    .ticketId(event.ticketId())",
+          "    .build();",
+          "  messageService.send(req);",
+          "}"
+        ]
+      }
+    },
+
+    "doD_verification": {
+      "rule": "이메일·SMS 발송 시 MailLog 자동 생성 확인 (CLAUDE.md DoD 패턴)",
+      "verification_method": [
+        "Unit test: Every call to MessageService.send() produces exactly 1 MailLog row",
+        "Integration test: POST /api/messages/send -> verify MailLog row exists in DB",
+        "Constraint: MailLog INSERT happens BEFORE gateway call (not after). If gateway crashes, MailLog still exists with PENDING status.",
+        "Negative test: Directly calling SMTP/SMS adapter without MessageService is prohibited. Adapter constructors are package-private, only injectable via MessageService."
+      ]
+    }
+  },
+
+  "api_endpoints": [
+    {
+      "method": "POST",
+      "path": "/api/messages/send",
+      "description": "Send email/SMS/alimtalk + auto-create MailLog + auto-create TicketEvent",
+      "auth": "AS_ENGINEER, CS_CX, TEAM_LEAD, ADMIN",
+      "request": {
+        "channel": "EMAIL | SMS | ALIMTALK",
+        "recipientEmail": "string (required for EMAIL)",
+        "recipientPhone": "string (required for SMS/ALIMTALK)",
+        "recipientName": "string (optional)",
+        "subject": "string (required for EMAIL, optional for SMS/ALIMTALK)",
+        "contentText": "string (required)",
+        "contentHtml": "string (optional, EMAIL only)",
+        "templateId": "string (optional, use template instead of freeform)",
+        "templateParams": "object (optional, key-value pairs for template substitution)",
+        "ticketId": "number (optional, links to ticket for event logging)",
+        "attachmentIds": "number[] (optional, EMAIL only, previously uploaded files)"
+      },
+      "validation": {
+        "channel=EMAIL": "recipientEmail required, valid email format",
+        "channel=SMS": "recipientPhone required, regex /^01[016789]\\d{7,8}$/",
+        "channel=ALIMTALK": "recipientPhone required, templateId required (alimtalk requires pre-approved template)",
+        "contentText": "required, 1..10000 chars",
+        "contentText for SMS": "max 90 chars (auto-switch to LMS if > 90)",
+        "ticketId": "if provided, ticket must exist"
+      },
+      "response_200": {
+        "logId": 50001,
+        "channel": "EMAIL",
+        "status": "SENT",
+        "sentAt": "2026-04-29T14:22:00.123Z",
+        "externalMsgId": "msg-abc-123",
+        "ticketEventId": 8801
+      },
+      "response_422": {
+        "code": "SEND_FAILED",
+        "message": "SMS 발송 실패: 수신 거부 번호",
+        "logId": 50002,
+        "status": "FAILED",
+        "errorCode": "R-401",
+        "errorDetail": "수신 거부 번호 (KT)"
+      },
+      "side_effects": [
+        "INSERT as_mail_logs (always, even on failure)",
+        "INSERT as_ticket_events (EMAIL_SENT or SMS_SENT) if ticket_id provided and send succeeded",
+        "INSERT as_ticket_events (FIRST_RESPONSE) if first outbound comm on ticket"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail-logs",
+      "description": "Paginated list of mail logs with filters",
+      "auth": "ALL (AS_ENGINEER/CS_CX see own logs only, TEAM_LEAD+ see all)",
+      "params": {
+        "channel": "EMAIL | SMS | ALIMTALK",
+        "status": "PENDING | SENT | DELIVERED | FAILED | CANCELLED",
+        "recipientKeyword": "email or phone substring search",
+        "ticketNo": "linked ticket number",
+        "sentBy": "userId filter",
+        "from": "ISO date",
+        "to": "ISO date",
+        "page": "0",
+        "size": "20",
+        "sort": "created_at,desc"
+      },
+      "response_200": "PageResponse<MailLogSummary>"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail-logs/{id}",
+      "description": "Mail log detail with full content and resend chain",
+      "auth": "ALL",
+      "response_200": {
+        "logId": 50001,
+        "channel": "EMAIL",
+        "recipientEmail": "minsu@email.com",
+        "subject": "A/S 접수 안내 (AS-2641)",
+        "contentText": "...",
+        "contentHtml": "...",
+        "status": "SENT",
+        "sentAt": "2026-04-29T14:22:00.123Z",
+        "ticketId": 2641,
+        "ticketNo": "AS-2641",
+        "sentByName": "박수리",
+        "resendChain": [
+          { "logId": 50001, "status": "SENT", "createdAt": "..." }
+        ]
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail-logs/{id}/resend",
+      "description": "Resend same content to same recipient. Creates new MailLog with parent_log_id.",
+      "auth": "AS_ENGINEER, CS_CX, TEAM_LEAD, ADMIN",
+      "request": "{}",
+      "response_200": {
+        "logId": 50003,
+        "parentLogId": 50001,
+        "status": "SENT",
+        "sentAt": "2026-04-29T15:00:00.000Z"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail-logs/{id}/resend-modified",
+      "description": "Resend with modified recipient. Creates new MailLog with parent_log_id.",
+      "auth": "AS_ENGINEER, CS_CX, TEAM_LEAD, ADMIN",
+      "request": {
+        "recipientEmail": "new-email@example.com",
+        "recipientPhone": "010-9876-5432",
+        "channel": "SMS"
+      },
+      "response_200": "Same shape as /resend"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail-logs/failed",
+      "description": "All FAILED mail logs (for failed queue dashboard)",
+      "auth": "ALL (own logs for AS_ENGINEER/CS_CX)",
+      "response_200": "MailLogSummary[]"
+    },
+    {
+      "method": "POST",
+      "path": "/api/mail-logs/batch-resend",
+      "description": "Resend all selected failed logs at once",
+      "auth": "TEAM_LEAD, ADMIN",
+      "request": { "logIds": [50001, 50002, 50003] },
+      "response_200": { "resent": 2, "failed": 1, "details": [] }
+    },
+    {
+      "method": "GET",
+      "path": "/api/mail-logs/stats",
+      "description": "Sending statistics (KPI dashboard)",
+      "auth": "TEAM_LEAD, ADMIN",
+      "params": { "from": "ISO date", "to": "ISO date" },
+      "response_200": {
+        "totalSent": 2648926,
+        "successRate": 98.2,
+        "failedCount": 8,
+        "pendingCount": 3,
+        "byChannel": {
+          "EMAIL": { "total": 1200000, "success": 1195000, "failed": 3 },
+          "SMS": { "total": 1400000, "success": 1396000, "failed": 4 },
+          "ALIMTALK": { "total": 48926, "success": 48925, "failed": 1 }
+        }
+      }
+    }
+  ]
+}

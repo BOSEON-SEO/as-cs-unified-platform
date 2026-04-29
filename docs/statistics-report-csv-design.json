@@ -1,0 +1,649 @@
+{
+  "meta": {
+    "document": "Statistics Report & CSV Download Design",
+    "phase": "Phase 3 (report page #13) + Phase 3 (statistics page #14)",
+    "createdAt": "2026-04-29",
+    "pages": [
+      "페이지 #13 리포트 현황 (TEAM_LEAD, ADMIN only)",
+      "페이지 #14 전체 통계 대시보드 (ALL roles, scope-filtered)"
+    ],
+    "related_docs": [
+      "docs/slides/13-report.md",
+      "docs/slides/14-statistics-dashboard.md",
+      "docs/ticket-lifecycle-tracking.md (KPI definitions)"
+    ]
+  },
+
+  "section1_statistics_ui": {
+    "title": "(1) Statistics Page UI Design",
+
+    "page_14_statistics_dashboard": {
+      "route": "/14",
+      "pageId": "14",
+      "description": "Real-time operations dashboard with 30s auto-refresh",
+      "rbac_visibility": {
+        "ADMIN": "All sections, all data",
+        "TEAM_LEAD": "All sections, team-scoped data",
+        "AS_ENGINEER": "Personal KPI only (my tickets, my costs)",
+        "CS_CX": "Personal consultation stats only"
+      },
+
+      "sections": {
+        "kpi_cards": {
+          "description": "4 top-level KPI cards with month-over-month delta",
+          "auto_refresh": "30s polling via react-query refetchInterval",
+          "cards": [
+            {
+              "key": "totalTickets",
+              "label": "총 A/S 접수",
+              "value_example": "247",
+              "delta": "+12% MoM",
+              "accent": "blue",
+              "api_field": "totalTickets",
+              "delta_field": "totalTicketsDelta"
+            },
+            {
+              "key": "completionRate",
+              "label": "완료율",
+              "value_example": "84.4%",
+              "delta": "+2.1%p MoM",
+              "accent": "green",
+              "formula": "CLOSED / (total - CANCELLED) * 100"
+            },
+            {
+              "key": "avgResolutionDays",
+              "label": "평균 처리일",
+              "value_example": "3.2일",
+              "delta": "-0.3일 MoM",
+              "accent": "amber",
+              "source": "E2E time from ticket-lifecycle-tracking.md"
+            },
+            {
+              "key": "totalCostNet",
+              "label": "순비용",
+              "value_example": "-890K",
+              "delta": "-21% MoM",
+              "accent": "red",
+              "formula": "SUM(CUSTOMER_PAYMENT) + SUM(VENDOR_COMPENSATION) - SUM(OUR_EXPENSE)",
+              "filter": "APPROVED only"
+            }
+          ]
+        },
+
+        "trend_chart": {
+          "type": "LineChart (Recharts)",
+          "title": "월별 접수 vs 완료 트렌드",
+          "x_axis": "Month (recent 6 months)",
+          "y_axis": "Ticket count",
+          "lines": [
+            { "key": "received", "label": "접수", "color": "#3B82F6", "style": "solid" },
+            { "key": "completed", "label": "완료", "color": "#10B981", "style": "dashed" }
+          ],
+          "api": "GET /api/stats/trend?months=6"
+        },
+
+        "product_frequency": {
+          "type": "HorizontalBarChart",
+          "title": "제품별 A/S 빈도 Top 10",
+          "api": "GET /api/stats/product-frequency?limit=10",
+          "fields": ["productModel", "count"],
+          "color": "#3B82F6"
+        },
+
+        "symptom_distribution": {
+          "type": "DonutChart",
+          "title": "증상 유형 분포",
+          "api": "GET /api/stats/symptom-distribution",
+          "segments": [
+            { "key": "audio", "label": "음향", "color": "#3B82F6" },
+            { "key": "charging", "label": "충전", "color": "#10B981" },
+            { "key": "exterior", "label": "외관", "color": "#F59E0B" },
+            { "key": "pairing", "label": "페어링", "color": "#8B5CF6" },
+            { "key": "other", "label": "기타", "color": "#94A3B8" }
+          ]
+        },
+
+        "action_queue": {
+          "title": "액션 필요 큐",
+          "description": "Anomaly patterns detected automatically (tobe-tickets /actions absorbed)",
+          "api": "GET /api/stats/action-queue",
+          "patterns": [
+            { "key": "zombie",       "label": "좀비 티켓",     "severity": "critical", "definition": "status=IN_PROGRESS, no event for 14+ days" },
+            { "key": "no_response",  "label": "응대 누락",     "severity": "critical", "definition": "no FIRST_RESPONSE within 48h of creation" },
+            { "key": "fake_close",   "label": "가짜 완료",     "severity": "high",     "definition": "CLOSED but no SHIPMENT or RECALL exists" },
+            { "key": "time_error",   "label": "시각 오류",     "severity": "high",     "definition": "event occurred_at before previous event" },
+            { "key": "unassigned",   "label": "미배정 4h+",    "severity": "high",     "definition": "status=RECEIVED for 4+ hours" },
+            { "key": "cost_mismatch","label": "비용 불일치",   "severity": "medium",   "definition": "cost entries exist but net differs from expected" },
+            { "key": "no_attachment","label": "첨부 누락",     "severity": "medium",   "definition": "CLOSED ticket with zero attachments" },
+            { "key": "no_memo",      "label": "메모 미작성",   "severity": "low",      "definition": "CLOSED ticket with zero NOTE_ADDED events" }
+          ],
+          "click_action": "Navigate to /tickets?filter={pattern} to show matching tickets"
+        },
+
+        "sla_summary": {
+          "title": "SLA 준수율",
+          "api": "GET /api/stats/sla-summary",
+          "kpis": [
+            { "key": "assignmentSla",      "label": "접수→배정",  "target": "<4h",     "current_example": "94%",   "met": true },
+            { "key": "firstResponseSla",   "label": "최초응답",   "target": "<24h",    "current_example": "88%",   "met": false },
+            { "key": "resolutionSla",      "label": "전체해결",   "target": "<5영업일", "current_example": "92%",   "met": true }
+          ]
+        },
+
+        "assignee_performance": {
+          "title": "담당자별 성과",
+          "api": "GET /api/stats/assignee-performance",
+          "visible_to": ["TEAM_LEAD", "ADMIN"],
+          "columns": ["name", "totalTickets", "completedTickets", "avgDays", "slaRate", "commDensity"]
+        },
+
+        "cost_summary": {
+          "title": "비용 월별 추이",
+          "api": "GET /api/stats/cost-trend?months=6",
+          "type": "StackedBarChart",
+          "stacks": [
+            { "key": "expense", "label": "지출", "color": "#EF4444" },
+            { "key": "payment", "label": "수납", "color": "#10B981" },
+            { "key": "compensation", "label": "보상", "color": "#3B82F6" }
+          ]
+        },
+
+        "mail_stats": {
+          "title": "발송 통계",
+          "api": "GET /api/mail-logs/stats",
+          "kpis": [
+            { "key": "totalSent", "label": "총 발송", "value_example": "2,648,926" },
+            { "key": "successRate", "label": "성공률", "value_example": "98.2%" },
+            { "key": "failedCount", "label": "실패", "value_example": "8" }
+          ]
+        }
+      },
+
+      "filters": [
+        { "key": "period", "type": "month-picker", "label": "기간", "default": "current month" },
+        { "key": "brand", "type": "select", "label": "브랜드", "options": ["전체", "GT Gear", "TOBE"] }
+      ]
+    },
+
+    "page_13_report": {
+      "route": "/13",
+      "pageId": "13",
+      "description": "Report generation, preview, and export (Excel/PDF/CSV)",
+      "rbac": "TEAM_LEAD, ADMIN only",
+
+      "report_types": [
+        {
+          "key": "MONTHLY",
+          "label": "월간 리포트",
+          "description": "Monthly A/S summary: ticket counts, completion rate, costs, assignee breakdown",
+          "period_input": "YYYY-MM (month picker)",
+          "sections_included": ["ticket_summary", "cost_summary", "assignee_breakdown", "sla_summary", "product_frequency"]
+        },
+        {
+          "key": "QUARTERLY",
+          "label": "분기 리포트",
+          "description": "Quarterly aggregation: 3-month trend comparison",
+          "period_input": "YYYY-Q (e.g., 2026-Q1)",
+          "sections_included": ["ticket_summary", "cost_summary", "trend_comparison", "sla_summary"]
+        },
+        {
+          "key": "COMPENSATION",
+          "label": "본사 보상 추적",
+          "description": "Vendor compensation claim report: 3-axis cost per ticket for headquarters submission",
+          "period_input": "YYYY-MM",
+          "sections_included": ["compensation_detail", "compensation_summary"]
+        },
+        {
+          "key": "CUSTOM",
+          "label": "커스텀 리포트",
+          "description": "User selects which sections to include, with custom date range",
+          "period_input": "date range (from-to)",
+          "sections_included": "user-selected subset"
+        }
+      ],
+
+      "preview_kpis": [
+        { "key": "totalReceived", "label": "총 접수", "format": "number" },
+        { "key": "totalCompleted", "label": "총 완료", "format": "number" },
+        { "key": "completionRate", "label": "처리율", "format": "percent" },
+        { "key": "totalExpense", "label": "총 비용", "format": "currency_krw" },
+        { "key": "totalCompensation", "label": "보상 청구", "format": "currency_krw" },
+        { "key": "avgDays", "label": "평균 처리일", "format": "days" }
+      ],
+
+      "export_formats": ["XLSX", "PDF", "CSV"]
+    }
+  },
+
+  "section2_csv_schema": {
+    "title": "(2) CSV Download Schema",
+
+    "csv_types": {
+      "TICKET_LIST": {
+        "description": "All tickets matching current filters",
+        "filename_pattern": "AS_tickets_{from}_{to}_{timestamp}.csv",
+        "download_from": ["/tickets page Excel button", "/13 report page"],
+        "columns": [
+          { "header": "A/S번호",       "field": "ticketNo",        "type": "string",   "example": "AS-2641" },
+          { "header": "접수일",         "field": "createdAt",       "type": "datetime", "format": "YYYY-MM-DD HH:mm" },
+          { "header": "고객명",         "field": "customerName",    "type": "string",   "example": "김민수" },
+          { "header": "고객전화",       "field": "customerPhone",   "type": "string",   "example": "010-1234-5678" },
+          { "header": "제품모델",       "field": "productModel",    "type": "string",   "example": "WE-300" },
+          { "header": "시리얼",         "field": "serialNumber",    "type": "string",   "example": "WE300-2026-00412" },
+          { "header": "유형",           "field": "ticketType",      "type": "enum",     "values": ["수리","교환","반품"] },
+          { "header": "우선도",         "field": "priority",        "type": "enum",     "values": ["일반","긴급","VIP"] },
+          { "header": "상태",           "field": "status",          "type": "enum",     "values": ["접수","배정됨","진행중","비용입력","출고/회수","완료","취소","보류"] },
+          { "header": "담당자",         "field": "assigneeName",    "type": "string",   "example": "박수리" },
+          { "header": "경과일",         "field": "elapsedDays",     "type": "number",   "example": "3.2" },
+          { "header": "SLA(%)",         "field": "slaPercent",      "type": "number",   "example": "64" },
+          { "header": "지출",           "field": "totalExpense",    "type": "number",   "example": "45000" },
+          { "header": "수납",           "field": "totalPayment",    "type": "number",   "example": "30000" },
+          { "header": "보상",           "field": "totalCompensation","type": "number",  "example": "20000" },
+          { "header": "순비용",         "field": "netCost",         "type": "number",   "example": "5000" },
+          { "header": "증상",           "field": "symptom",         "type": "string",   "example": "좌측 무음" },
+          { "header": "처리결과",       "field": "resolutionType",  "type": "string",   "example": "수리 완료" },
+          { "header": "종료일",         "field": "closedAt",        "type": "datetime", "format": "YYYY-MM-DD HH:mm" },
+          { "header": "채널",           "field": "channel",         "type": "string",   "example": "전화" }
+        ],
+        "total_columns": 20,
+        "encoding": "UTF-8 BOM (for Excel Korean compatibility)",
+        "delimiter": ","
+      },
+
+      "COST_LIST": {
+        "description": "All cost entries matching current filters",
+        "filename_pattern": "AS_costs_{from}_{to}_{timestamp}.csv",
+        "download_from": ["/6 cost page Excel button", "/13 report page"],
+        "columns": [
+          { "header": "비용ID",       "field": "costId",        "type": "number" },
+          { "header": "A/S번호",      "field": "ticketNo",      "type": "string" },
+          { "header": "고객명",       "field": "customerName",  "type": "string" },
+          { "header": "비용축",       "field": "axis",          "type": "enum",     "values": ["지출","수납","보상"] },
+          { "header": "항목",         "field": "categoryLabel", "type": "string",   "example": "부품비" },
+          { "header": "금액(원)",     "field": "amount",        "type": "number",   "example": "15000" },
+          { "header": "비고",         "field": "description",   "type": "string" },
+          { "header": "승인상태",     "field": "status",        "type": "enum",     "values": ["대기","승인","반려"] },
+          { "header": "입력자",       "field": "createdByName", "type": "string" },
+          { "header": "입력일",       "field": "createdAt",     "type": "datetime" },
+          { "header": "승인자",       "field": "approvedByName","type": "string" },
+          { "header": "승인일",       "field": "approvedAt",    "type": "datetime" }
+        ],
+        "total_columns": 12
+      },
+
+      "COMPENSATION_REPORT": {
+        "description": "Vendor compensation claims for headquarters submission",
+        "filename_pattern": "AS_compensation_{month}_{timestamp}.csv",
+        "download_from": ["/13 report page (type=COMPENSATION)"],
+        "columns": [
+          { "header": "A/S번호",      "field": "ticketNo" },
+          { "header": "접수일",       "field": "createdAt" },
+          { "header": "고객명",       "field": "customerName" },
+          { "header": "제품모델",     "field": "productModel" },
+          { "header": "시리얼",       "field": "serialNumber" },
+          { "header": "증상",         "field": "symptom" },
+          { "header": "처리결과",     "field": "resolutionType" },
+          { "header": "우리지출(원)", "field": "totalExpense",       "type": "number" },
+          { "header": "고객수납(원)", "field": "totalPayment",       "type": "number" },
+          { "header": "보상청구(원)", "field": "totalCompensation",  "type": "number" },
+          { "header": "순비용(원)",   "field": "netCost",            "type": "number" },
+          { "header": "보증상태",     "field": "warrantyStatus",     "values": ["유효","만료"] },
+          { "header": "종료일",       "field": "closedAt" },
+          { "header": "담당자",       "field": "assigneeName" }
+        ],
+        "total_columns": 14,
+        "filter": "Only APPROVED cost entries with axis=VENDOR_COMPENSATION"
+      },
+
+      "MAIL_LOG": {
+        "description": "Email/SMS send history",
+        "filename_pattern": "AS_mail_logs_{from}_{to}_{timestamp}.csv",
+        "download_from": ["/11 mail log page Excel button"],
+        "columns": [
+          { "header": "로그ID",       "field": "logId" },
+          { "header": "채널",         "field": "channel",       "values": ["이메일","SMS","알림톡"] },
+          { "header": "수신자",       "field": "recipientDisplay", "note": "email or phone" },
+          { "header": "제목/내용",    "field": "subjectOrPreview" },
+          { "header": "상태",         "field": "status",        "values": ["성공","실패","대기","취소"] },
+          { "header": "A/S번호",      "field": "ticketNo" },
+          { "header": "발송자",       "field": "sentByName" },
+          { "header": "발송일시",     "field": "sentAt" },
+          { "header": "실패사유",     "field": "errorDetail" }
+        ],
+        "total_columns": 9
+      },
+
+      "MONTHLY_SUMMARY": {
+        "description": "Aggregated monthly report (single-row-per-month)",
+        "filename_pattern": "AS_monthly_summary_{from}_{to}_{timestamp}.csv",
+        "download_from": ["/13 report page (type=MONTHLY)"],
+        "columns": [
+          { "header": "월",             "field": "month",              "example": "2026-04" },
+          { "header": "접수건수",       "field": "totalReceived" },
+          { "header": "완료건수",       "field": "totalCompleted" },
+          { "header": "처리율(%)",      "field": "completionRate" },
+          { "header": "평균처리일",     "field": "avgDays" },
+          { "header": "SLA준수율(%)",   "field": "slaRate" },
+          { "header": "지출합계(원)",   "field": "totalExpense" },
+          { "header": "수납합계(원)",   "field": "totalPayment" },
+          { "header": "보상합계(원)",   "field": "totalCompensation" },
+          { "header": "순비용(원)",     "field": "netCost" },
+          { "header": "이메일발송",     "field": "emailCount" },
+          { "header": "SMS발송",        "field": "smsCount" },
+          { "header": "발송성공률(%)",  "field": "mailSuccessRate" }
+        ],
+        "total_columns": 13
+      }
+    },
+
+    "filter_options": {
+      "description": "Filters applied before CSV generation (server-side). Same filters visible on each page.",
+      "common_filters": [
+        { "key": "from", "type": "date", "label": "시작일", "default": "first day of current month" },
+        { "key": "to", "type": "date", "label": "종료일", "default": "today" }
+      ],
+      "ticket_filters": [
+        { "key": "status", "type": "multi-select", "options": ["RECEIVED","ASSIGNED","IN_PROGRESS","COST_ENTERED","SHIPPING","CLOSED","CANCELLED","ON_HOLD"] },
+        { "key": "ticketType", "type": "multi-select", "options": ["REPAIR","EXCHANGE","RETURN"] },
+        { "key": "priority", "type": "multi-select", "options": ["NORMAL","URGENT","VIP"] },
+        { "key": "assigneeId", "type": "select", "options": "dynamic from GET /api/assignees" },
+        { "key": "productModel", "type": "select", "options": "dynamic from GET /api/products/models" }
+      ],
+      "cost_filters": [
+        { "key": "axis", "type": "select", "options": ["OUR_EXPENSE","CUSTOMER_PAYMENT","VENDOR_COMPENSATION"] },
+        { "key": "costStatus", "type": "select", "options": ["PENDING","APPROVED","REJECTED"] }
+      ],
+      "row_limit": {
+        "csv": "No limit (all matching rows streamed)",
+        "xlsx": "Max 100,000 rows per sheet (Excel limitation)",
+        "pdf": "Max 500 rows (PDF pagination)"
+      }
+    }
+  },
+
+  "section3_backend_frontend": {
+    "title": "(3) Backend CSV Generation & Frontend Download",
+
+    "backend_csv_generation": {
+      "approach": "Server-side streaming CSV generation",
+      "rationale": [
+        "Data can be 100K+ rows (mail logs 2.6M, tickets 10K+) — client-side generation would crash browser",
+        "Server applies RBAC filters (TEAM_LEAD sees team only, ADMIN sees all)",
+        "PII masking for non-ADMIN users (customer phone partially masked in CSV)",
+        "Consistent encoding (UTF-8 BOM for Korean Excel compatibility)"
+      ],
+
+      "spring_implementation": {
+        "controller": "ExportController",
+        "pattern": "StreamingResponseBody for large datasets",
+
+        "code_structure": [
+          "@GetMapping('/api/export/tickets')",
+          "@PreAuthorize('hasAnyRole(\"TEAM_LEAD\",\"ADMIN\")')",
+          "public ResponseEntity<StreamingResponseBody> exportTickets(",
+          "    @RequestParam String from,",
+          "    @RequestParam String to,",
+          "    @RequestParam(required=false) List<String> status,",
+          "    @RequestParam(required=false) String assigneeId,",
+          "    @RequestParam String format  // csv, xlsx",
+          ") {",
+          "    String filename = 'AS_tickets_' + from + '_' + to + '_' + timestamp + '.' + format;",
+          "",
+          "    StreamingResponseBody body = outputStream -> {",
+          "        if (format.equals('csv')) {",
+          "            // Write UTF-8 BOM",
+          "            outputStream.write(new byte[]{(byte)0xEF, (byte)0xBB, (byte)0xBF});",
+          "",
+          "            // Write header row",
+          "            csvWriter.writeHeader(outputStream, TICKET_COLUMNS);",
+          "",
+          "            // Stream data in chunks (1000 rows per batch)",
+          "            ticketRepository.streamByFilters(from, to, status, assigneeId)",
+          "                .forEach(ticket -> csvWriter.writeRow(outputStream, ticket));",
+          "        } else if (format.equals('xlsx')) {",
+          "            // Apache POI SXSSFWorkbook (streaming, low memory)",
+          "            excelService.writeTickets(outputStream, from, to, status, assigneeId);",
+          "        }",
+          "    };",
+          "",
+          "    return ResponseEntity.ok()",
+          "        .header(HttpHeaders.CONTENT_DISPOSITION, 'attachment; filename=\"' + filename + '\"')",
+          "        .contentType(format.equals('csv')",
+          "            ? MediaType.parseMediaType('text/csv; charset=UTF-8')",
+          "            : MediaType.parseMediaType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'))",
+          "        .body(body);",
+          "}"
+        ],
+
+        "streaming_detail": {
+          "csv": "Write rows directly to OutputStream via BufferedWriter. No intermediate List<>.",
+          "xlsx": "Apache POI SXSSFWorkbook with window size 100 (keeps only 100 rows in memory, flushes older rows to temp file)",
+          "pdf": "iText or OpenPDF. Max 500 rows. Table layout with company header."
+        },
+
+        "pii_handling": {
+          "ADMIN": "Full data (no masking)",
+          "TEAM_LEAD": "Customer phone: last 4 digits only (***-****-5678). Name: full.",
+          "AS_ENGINEER": "Cannot download CSV (page not accessible)",
+          "implementation": "ExportService checks SecurityContext role and applies masking function per row"
+        }
+      }
+    },
+
+    "frontend_download": {
+      "approach": "Fetch as blob + trigger browser download",
+
+      "react_implementation": {
+        "hook": "useExportDownload (src/hooks/useExportDownload.ts)",
+        "code_example": [
+          "function useExportDownload() {",
+          "  const [isDownloading, setIsDownloading] = useState(false);",
+          "",
+          "  async function download(endpoint: string, params: Record<string,string>, format: 'csv' | 'xlsx') {",
+          "    setIsDownloading(true);",
+          "    try {",
+          "      const queryString = new URLSearchParams({ ...params, format }).toString();",
+          "      const response = await apiClient.get(`${endpoint}?${queryString}`, {",
+          "        responseType: 'blob',",
+          "        timeout: 120_000,  // 2 min for large exports",
+          "      });",
+          "",
+          "      // Extract filename from Content-Disposition header",
+          "      const disposition = response.headers['content-disposition'] || '';",
+          "      const filenameMatch = disposition.match(/filename=\"(.+)\"/);",
+          "      const filename = filenameMatch?.[1] ?? `export_${Date.now()}.${format}`;",
+          "",
+          "      // Create download link",
+          "      const url = window.URL.createObjectURL(response.data);",
+          "      const link = document.createElement('a');",
+          "      link.href = url;",
+          "      link.download = filename;",
+          "      document.body.appendChild(link);",
+          "      link.click();",
+          "      link.remove();",
+          "      window.URL.revokeObjectURL(url);",
+          "",
+          "      toast.success(`${filename} 다운로드 완료`);",
+          "    } catch (error) {",
+          "      toast.error('다운로드에 실패했습니다. 다시 시도해 주세요.');",
+          "    } finally {",
+          "      setIsDownloading(false);",
+          "    }",
+          "  }",
+          "",
+          "  return { download, isDownloading };",
+          "}"
+        ],
+
+        "electron_handling": {
+          "note": "In Electron, blob download works the same way via Chromium. No special IPC needed.",
+          "file_dialog": "Electron will show native save-as dialog automatically on blob download."
+        },
+
+        "ui_buttons": {
+          "ticket_list_page": {
+            "location": "Header actions",
+            "button": "📤 Excel",
+            "endpoint": "/api/export/tickets",
+            "params": "current page filters"
+          },
+          "cost_tracking_page": {
+            "location": "Header actions",
+            "button": "⬇ Excel",
+            "endpoint": "/api/export/costs",
+            "params": "current page filters"
+          },
+          "mail_log_page": {
+            "location": "Header actions",
+            "button": "📤 Excel",
+            "endpoint": "/api/export/mail-logs",
+            "params": "current page filters"
+          },
+          "report_page": {
+            "location": "Report row actions",
+            "buttons": ["Excel ⬇", "PDF 📄", "CSV ⬇"],
+            "endpoint": "/api/reports/export",
+            "params": "reportId + format"
+          }
+        },
+
+        "loading_state": {
+          "during_download": "Button shows spinner + 'Downloading...' text, disabled",
+          "timeout": "120 seconds (large datasets may take 30-60s)",
+          "error": "Toast notification with retry option"
+        }
+      }
+    },
+
+    "api_endpoints": [
+      {
+        "method": "GET",
+        "path": "/api/export/tickets",
+        "description": "Stream ticket list as CSV or XLSX",
+        "auth": "TEAM_LEAD, ADMIN",
+        "params": "from, to, status[], ticketType[], priority[], assigneeId, productModel, format(csv|xlsx)",
+        "response": "StreamingResponseBody (binary file)",
+        "headers": {
+          "Content-Type": "text/csv; charset=UTF-8 OR application/vnd.openxmlformats-...",
+          "Content-Disposition": "attachment; filename=\"AS_tickets_2026-04_20260429.csv\""
+        },
+        "max_rows": "No limit for CSV, 100K for XLSX"
+      },
+      {
+        "method": "GET",
+        "path": "/api/export/costs",
+        "description": "Stream cost entries as CSV or XLSX",
+        "auth": "TEAM_LEAD, ADMIN",
+        "params": "from, to, axis, costStatus, assigneeId, format",
+        "response": "StreamingResponseBody"
+      },
+      {
+        "method": "GET",
+        "path": "/api/export/mail-logs",
+        "description": "Stream mail logs as CSV or XLSX",
+        "auth": "TEAM_LEAD, ADMIN",
+        "params": "from, to, channel, status, sentBy, format",
+        "response": "StreamingResponseBody"
+      },
+      {
+        "method": "POST",
+        "path": "/api/reports",
+        "description": "Generate a report (server-side aggregation, stored)",
+        "auth": "TEAM_LEAD, ADMIN",
+        "request": {
+          "type": "MONTHLY | QUARTERLY | COMPENSATION | CUSTOM",
+          "period": "2026-04 or 2026-Q1 or {from, to}",
+          "assigneeId": "number (optional, for team-scoped)",
+          "sections": "string[] (for CUSTOM type)"
+        },
+        "response_201": {
+          "reportId": 42,
+          "type": "MONTHLY",
+          "period": "2026-04",
+          "preview": {
+            "totalReceived": 247,
+            "totalCompleted": 208,
+            "completionRate": 84.4,
+            "totalExpense": 2340000,
+            "totalCompensation": 1200000,
+            "netCost": -250000,
+            "avgDays": 3.2
+          },
+          "createdAt": "2026-04-29T09:00:00Z",
+          "createdByName": "김팀장"
+        }
+      },
+      {
+        "method": "GET",
+        "path": "/api/reports",
+        "description": "List generated reports",
+        "auth": "TEAM_LEAD, ADMIN",
+        "params": "type, period, page, size",
+        "response": "PageResponse<ReportSummary>"
+      },
+      {
+        "method": "GET",
+        "path": "/api/reports/{id}",
+        "description": "Report detail with preview data",
+        "auth": "TEAM_LEAD, ADMIN",
+        "response": "ReportDetail (with preview KPIs + assignee breakdown)"
+      },
+      {
+        "method": "GET",
+        "path": "/api/reports/{id}/export",
+        "description": "Export generated report as file",
+        "auth": "TEAM_LEAD, ADMIN",
+        "params": "format(csv|xlsx|pdf)",
+        "response": "StreamingResponseBody"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/trend",
+        "params": "months(default 6)",
+        "response": "TrendDataPoint[] ({month, received, completed})",
+        "auth": "ALL (scope-filtered by role)"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/product-frequency",
+        "params": "limit(default 10), from, to",
+        "response": "ProductFrequency[] ({productModel, count})",
+        "auth": "ALL"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/symptom-distribution",
+        "params": "from, to",
+        "response": "SymptomSegment[] ({category, count, percent})",
+        "auth": "ALL"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/action-queue",
+        "response": "ActionQueueItem[] ({pattern, label, severity, count})",
+        "auth": "TEAM_LEAD, ADMIN"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/sla-summary",
+        "params": "from, to",
+        "response": "SlaSummary ({assignmentSla, firstResponseSla, resolutionSla})",
+        "auth": "TEAM_LEAD, ADMIN"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/assignee-performance",
+        "params": "from, to",
+        "response": "AssigneePerformance[]",
+        "auth": "TEAM_LEAD, ADMIN"
+      },
+      {
+        "method": "GET",
+        "path": "/api/stats/cost-trend",
+        "params": "months(default 6)",
+        "response": "CostTrendPoint[] ({month, expense, payment, compensation, net})",
+        "auth": "TEAM_LEAD, ADMIN"
+      }
+    ]
+  }
+}
