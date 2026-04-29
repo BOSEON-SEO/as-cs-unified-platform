@@ -1,0 +1,392 @@
+{
+  "meta": {
+    "document": "Step 1 Research Validation Report",
+    "createdAt": "2026-04-29",
+    "validated": "21 design docs (docs/), 29 source files (src/), ROADMAP.md, CLAUDE.md",
+    "focus": "4 GoD + 7 pages (Cost/Shipment/Recall/Exchange + Registration/Assign/Settings)"
+  },
+
+  "section1_requirement_completeness": {
+    "title": "(1) 요구사항 완결성",
+    "grade": "A-",
+
+    "god_coverage": [
+      {
+        "god": "GoD-1: 비용 3축 합산 수치 정확",
+        "source": "ROADMAP Phase 3 DoD line 46",
+        "covered_by": "as-operations-milestone-spec.json page1_cost_tracking",
+        "completeness": "FULL",
+        "evidence": [
+          "순비용 공식 명확: netCost = SUM(CUSTOMER_PAYMENT) + SUM(VENDOR_COMPENSATION) - SUM(OUR_EXPENSE)",
+          "APPROVED only 조건 명시",
+          "승인 워크플로 3-state (PENDING→APPROVED/REJECTED)",
+          "axis→category 교차 검증 10종 정의",
+          "dod_verification test 명시: 3축 각 1건 → approve → summary 검증"
+        ]
+      },
+      {
+        "god": "GoD-2: 출고 생성 후 CX 인계 상태 반영",
+        "source": "ROADMAP Phase 4 DoD line 62",
+        "covered_by": "as-operations-milestone-spec.json page2_shipment",
+        "completeness": "FULL",
+        "evidence": [
+          "CX handover 3-state 정의: NOT_REQUIRED→PENDING→CONFIRMED",
+          "CS/CX 확인 프로토콜 5단계 플로우",
+          "RBAC: create=AS_ENGINEER, confirm=CS_CX",
+          "dod_verification: cxHandover=true → CS_CX confirm → CONFIRMED"
+        ]
+      },
+      {
+        "god": "GoD-3: 미회수 건 필터링 가능",
+        "source": "ROADMAP Phase 4 DoD line 63",
+        "covered_by": "as-operations-milestone-spec.json page3_recall",
+        "completeness": "FULL",
+        "evidence": [
+          "미회수 쿼리 정의: status IN (REQUESTED,ASSIGNED) AND pickup_date < CURDATE()",
+          "@Scheduled overdue detection 매 영업일 09:00",
+          "4-tab UI: 회수대기/기사배정/미회수/완료",
+          "dod_verification: recall(pickup_date=yesterday) → 미회수 탭 표시"
+        ]
+      },
+      {
+        "god": "GoD-4: 교환·반품 완료 후 재고 상태 정상 갱신",
+        "source": "ROADMAP Phase 4 DoD line 64",
+        "covered_by": "as-operations-milestone-spec.json page4_exchange_return",
+        "completeness": "PARTIAL — 재고 시스템 API 미확인",
+        "evidence": [
+          "3분기 필수 선택: 재고재등록/리퍼브/부품처리 (CLAUDE.md 규칙 준수)",
+          "각 분기별 inventory API 정의 (restock/refurbish/parts)",
+          "교환 출고 자동 생성 (Shipment 연결)",
+          "dod_verification: 3가지 분기 각각 → inventory API 호출 확인"
+        ],
+        "gap": "기존 재고 시스템 API 스펙 미확인 — Mock API로 구현 후 실제 연동 필요"
+      }
+    ],
+
+    "page_goal_clarity": [
+      { "page": "CostTrackingPage", "goal_clear": true, "goal": "3축 비용 입력 → 승인 → 월별 집계 → 본사 보상 정산" },
+      { "page": "ShipmentPage", "goal_clear": true, "goal": "출고 생성 → 송장 입력 → 배달 추적 → CX 인계 → 고객 안내" },
+      { "page": "RecallPage", "goal_clear": true, "goal": "회수 요청 → 기사 배정(SMS) → 수거 완료(등급) → 미회수 모니터링" },
+      { "page": "ExchangeReturnPage", "goal_clear": true, "goal": "접수 → 회수 → 검수 → 처리 분기(3종 필수) → 교환 출고 or 환불" },
+      { "page": "ProductRegistrationPage", "goal_clear": true, "goal": "시리얼 검증 → 정품등록 → 보증 산정 → 쿠폰 자동 발급 → 블랙리스트" },
+      { "page": "TicketAssignPage", "goal_clear": true, "goal": "미배정 큐 → 수동/자동 배정 → 부하 균형 → 이벤트 기록" },
+      { "page": "SettingsPage", "goal_clear": true, "goal": "사용자 CRUD → 시스템/SLA → LLM ON/OFF → 기본값(마스터)" }
+    ],
+
+    "findings": [
+      {
+        "id": "RC-1",
+        "severity": "HIGH",
+        "finding": "GoD-4의 재고 시스템 API가 미확인. as-operations-milestone-spec에 POST /api/inventory/restock, /refurbish, /parts 3개 endpoint가 정의되어 있으나, 기존 어드민의 재고 시스템이 이 API를 제공하는지 확인 안 됨.",
+        "impact": "Phase 4 DoD '교환·반품 완료 후 재고 상태 정상 갱신' 달성 불확실.",
+        "recommendation": "Sprint 시작 전 Spring 팀에 기존 재고 테이블/API 존재 여부 확인. 없으면 as_inventory 테이블 신규 설계 또는 Mock API 우선 구현."
+      },
+      {
+        "id": "RC-2",
+        "severity": "MEDIUM",
+        "finding": "반품 시 환불 프로세스가 '미확정'으로 남아 있음. ExchangeReturnPage user_flow 7번: '환불 프로세스 트리거 (수동/자동 — 미확정)'.",
+        "impact": "반품 완료 후 환불이 자동인지 수동인지에 따라 UI/API 설계가 달라짐.",
+        "recommendation": "실무진 확정 필요. 임시 방안: 반품 완료 시 '환불 대기' 상태 추가 → 별도 환불 승인 플로우."
+      }
+    ]
+  },
+
+  "section2_technical_feasibility": {
+    "title": "(2) 기술적 타당성",
+    "grade": "B+",
+
+    "data_model_assessment": [
+      {
+        "table": "as_cost_entries",
+        "realistic": true,
+        "assessment": "양호. axis ENUM(3값) + category VARCHAR(50) + amount INT + status ENUM(3값). 교차 검증은 Spring 서비스 레이어에서 수행. CHECK(amount >= 0) 제약 적절.",
+        "concern": "없음"
+      },
+      {
+        "table": "as_shipments",
+        "realistic": true,
+        "assessment": "양호. 수신인 정보 비정규화(고객 스냅샷)는 의도적. status 4-state + cx_handover 3-state 분리 적절.",
+        "concern": "carrier VARCHAR(50) 대신 carrier_id FK가 정규화에 맞지만, 택배사 수가 4~5개로 적어 VARCHAR 허용 가능."
+      },
+      {
+        "table": "as_recalls",
+        "realistic": true,
+        "assessment": "양호. driver_id FK, pickup_date DATE, grade ENUM(A/B/C) 적절. overdue 인덱스 (status, pickup_date) 정의됨.",
+        "concern": "없음"
+      },
+      {
+        "table": "as_exchange_returns",
+        "realistic": true,
+        "assessment": "대체로 양호. inspection_photos JSON, parts_detail JSON은 반정규화이지만 유연성 확보에 적합. restock_type ENUM 필수 선택이 CLAUDE.md 규칙과 일치.",
+        "concern": "exchange_shipment_id FK가 교환 출고와 직접 연결. 반품 시 shipment 불필요 → NULL 허용 적절."
+      },
+      {
+        "table": "as_product_registrations + as_coupons + as_serial_blacklist",
+        "realistic": true,
+        "assessment": "양호. serial_number UNIQUE로 중복 방지. warranty_expiry 자동 계산. coupon_code UNIQUE.",
+        "concern": "warranty_status 갱신이 @Scheduled batch 의존. batch 실패 시 만료 상태 부정확 → fallback: API 응답 시 실시간 계산 병행."
+      },
+      {
+        "table": "as_assignment_rules (singleton) + as_assignment_pool",
+        "realistic": true,
+        "assessment": "양호. id=1 CHECK 제약으로 싱글턴 보장. last_robin_user_id로 라운드로빈 상태 추적.",
+        "concern": "SERIALIZABLE 격리 수준이 12명 규모에서는 문제 없으나, 확장 시 병목 가능. 현 규모 적합."
+      },
+      {
+        "table": "as_system_settings (key-value)",
+        "realistic": true,
+        "assessment": "양호. key-value 패턴으로 설정 유연성 확보. JSON value로 복잡한 구조 저장 가능.",
+        "concern": "key 목록이 코드에 하드코딩될 수 있음. 상수 파일로 관리 권장."
+      }
+    ],
+
+    "api_implementability": {
+      "total_endpoints_across_all_docs": "~70+ endpoints defined across 21 design docs",
+      "assessment": "구현 가능. 모든 endpoint에 method, path, request/response, RBAC이 명시됨. Spring Boot 3.x + JPA로 구현 가능한 표준 REST 패턴.",
+      "concerns": [
+        {
+          "id": "API-1",
+          "concern": "일부 endpoint에서 POST vs PATCH 불일치가 이전 리뷰에서 지적됨 (assign). 통일 필요.",
+          "status": "지적됨, 미해결"
+        },
+        {
+          "id": "API-2",
+          "concern": "slaPercent 계산이 서버에서 해야 하는데 (영업시간 + ON_HOLD 차감), 알고리즘 상세가 정의되지 않음.",
+          "status": "구현 시 상세 설계 필요"
+        }
+      ]
+    },
+
+    "data_integrity": {
+      "assessment": "대체로 양호. FK 관계가 명확하고, 이벤트 불변성 규칙이 정의됨.",
+      "concerns": [
+        {
+          "id": "DI-1",
+          "severity": "CRITICAL",
+          "concern": "as_tickets 테이블 DDL이 어떤 설계 문서에도 정의되어 있지 않음. 모든 다른 테이블(cost, shipment, recall, exchange, event)이 ticket_id FK로 참조하지만 참조 대상 DDL 부재.",
+          "recommendation": "as-operations-milestone-spec 또는 별도 문서에 as_tickets DDL 즉시 추가."
+        },
+        {
+          "id": "DI-2",
+          "severity": "MEDIUM",
+          "concern": "Shipment/Recall 생성 시 ticket.status를 SHIPPING으로 변경하는 side-effect가 이전 리뷰에서 누락 지적됨. as-operations-milestone-spec page2에는 'Ticket status → SHIPPING' side-effect가 명시되어 있어 해소됨.",
+          "status": "RESOLVED in latest spec"
+        },
+        {
+          "id": "DI-3",
+          "severity": "LOW",
+          "concern": "ExchangeReturn.recall_id FK와 Recall.grade 연결: recall COMPLETED(grade=A) → exchange INSPECTION_READY. 이 자동 전이 트리거가 Spring @EventListener인지 명시 안 됨.",
+          "recommendation": "Recall COMPLETED 이벤트 → ExchangeReturn status 자동 갱신 로직 Spring 측에 문서화."
+        }
+      ]
+    }
+  },
+
+  "section3_dependency_analysis": {
+    "title": "(3) 의존성 분석",
+    "grade": "B+",
+
+    "page_order_dependencies": {
+      "correct_order": [
+        "1. Phase 2 Foundation (Sprint 0) — 모든 것의 선행 조건",
+        "2. Phase 3 Ticket CRUD (Sprint 1) — CostTracking + TicketAssign의 선행 조건",
+        "3. Phase 3 CostTracking + TicketAssign (Sprint 2) — 병렬 가능",
+        "4. Phase 4 Shipment + Recall (Sprint 3) — Ticket step 5 연동",
+        "5. Phase 4 ExchangeReturn + ProductRegistration (Sprint 3~4) — Recall COMPLETED 이후",
+        "6. Phase 5 MailLog + AI + Statistics (Sprint 4) — MailLog는 Recall SMS에 필요하므로 부분적 Sprint 3 선행",
+        "7. Settings (Sprint 0~4 점진적) — 사용자 관리는 Sprint 0, 나머지는 각 Phase에서 필요한 시점"
+      ],
+      "assessment": "순서가 올바름. 단, MailLog가 Phase 5로 분류되어 있으나 Recall 기사 배정 SMS에서 이미 필요 (Phase 4). 이 불일치가 아래 DEP-3에서 지적됨."
+    },
+
+    "data_flow_consistency": [
+      {
+        "flow": "Ticket → Cost → Report",
+        "consistency": "GOOD",
+        "detail": "ticket_id FK 일관. cost status APPROVED만 집계. 순비용 공식 일관 적용."
+      },
+      {
+        "flow": "Ticket → Shipment → CX Handover",
+        "consistency": "GOOD",
+        "detail": "shipment 생성 → ticket status SHIPPING. cx_handover 3-state 정의 완료."
+      },
+      {
+        "flow": "Ticket → Recall → ExchangeReturn",
+        "consistency": "GOOD",
+        "detail": "recall_id FK 연결. grade(A/B/C) → ExchangeReturn 처리 분기 기준."
+      },
+      {
+        "flow": "ExchangeReturn → Inventory",
+        "consistency": "PARTIAL",
+        "detail": "inventory API 3개 정의되어 있으나 기존 시스템 API 확인 안 됨."
+      },
+      {
+        "flow": "TicketAssign rules → SettingsPage",
+        "consistency": "GOOD",
+        "detail": "as_assignment_rules 싱글턴을 양쪽에서 공유. SettingsPage에서 수정, TicketAssignPage에서 표시+실행."
+      },
+      {
+        "flow": "ProductRegistration → CustomerPage",
+        "consistency": "GOOD",
+        "detail": "customer_id FK. CustomerPage 정품등록 탭에서 GET /api/customers/{id}/registrations."
+      }
+    ],
+
+    "external_system_timing": [
+      {
+        "id": "DEP-1",
+        "system": "택배사 추적 API",
+        "planned_phase": "Phase 4",
+        "realistic": true,
+        "detail": "초기: 추적 URL 링크만 (4사 패턴 정의됨). 자동 배달 확인은 후속. 현실적."
+      },
+      {
+        "id": "DEP-2",
+        "system": "재고 시스템",
+        "planned_phase": "Phase 4",
+        "realistic": "UNCERTAIN",
+        "detail": "기존 재고 시스템 API 미확인. Mock API로 우선 구현 가능하나 실제 연동 시 추가 작업 발생.",
+        "risk": "HIGH"
+      },
+      {
+        "id": "DEP-3",
+        "system": "SMS 게이트웨이 (MailLog)",
+        "planned_phase": "Phase 5",
+        "realistic": "TIMING ISSUE",
+        "detail": "MailLog가 Phase 5이지만, Recall 기사 배정 SMS가 Phase 4에서 필요. CLAUDE.md: '이메일·SMS 발송 시 반드시 MailLog 기록'. Phase 4에서 MailLog 없이 SMS 발송하면 규칙 위반.",
+        "recommendation": "MailLog 기본 기능(SMS 발송 + 기록)을 Phase 4로 앞당기거나, Recall SMS를 Phase 5로 미루거나, Phase 4에서는 MailLog 없이 직접 SMS 발송 후 Phase 5에서 소급 기록."
+      },
+      {
+        "id": "DEP-4",
+        "system": "CX 시스템 (알림)",
+        "planned_phase": "Phase 4",
+        "realistic": true,
+        "detail": "CX 인계 알림은 내부 시스템 notification. 외부 의존 없음."
+      }
+    ]
+  },
+
+  "section4_gaps_and_improvements": {
+    "title": "(4) 누락 및 개선사항",
+
+    "missing_requirements": [
+      {
+        "id": "GAP-1",
+        "severity": "CRITICAL",
+        "area": "DB Schema",
+        "missing": "as_tickets 테이블 DDL",
+        "impact": "전체 시스템의 중심 테이블. 6개 다른 테이블이 FK 참조.",
+        "recommendation": "즉시 정의. 핵심 컬럼 ~25개 (ticket_id, ticket_no, customer_id, product_model, serial_number, symptom, ticket_type, priority, status, assignee_id, sla_percent, diagnosis_result, resolution_plan, resolution_type, closure_summary, notes, total_expense, total_payment, total_compensation, net_cost, created_by, created_at, updated_at, closed_at)."
+      },
+      {
+        "id": "GAP-2",
+        "severity": "HIGH",
+        "area": "Code vs Design",
+        "missing": "Phase 2 기반 인프라 코드 전부 (src/api, src/stores, src/types/domain, src/components/guards, src/components/common)",
+        "impact": "설계 21문서(440KB) vs 코드 29파일(placeholder). 모든 페이지 구현의 선행 조건 미충족.",
+        "recommendation": "Sprint 0을 최우선 실행. 설계는 충분 — 코드 구현에 집중."
+      },
+      {
+        "id": "GAP-3",
+        "severity": "HIGH",
+        "area": "Router",
+        "missing": "router.tsx에 /tickets/:ticketId 동적 라우트 없음. /tickets/new 없음. /login 없음.",
+        "impact": "티켓 CRUD + 양방향 네비게이션 전체 차단.",
+        "recommendation": "Sprint 0에서 router.tsx 리팩터링 (bidirectional-navigation-architecture.json 참조)."
+      },
+      {
+        "id": "GAP-4",
+        "severity": "HIGH",
+        "area": "Electron",
+        "missing": "createBrowserRouter + file:// 비호환 미해결",
+        "impact": "Electron 프로덕션에서 라우팅 완전 실패",
+        "recommendation": "createHashRouter 전환 (architecture-review-and-approval.json PI-1 참조)"
+      },
+      {
+        "id": "GAP-5",
+        "severity": "MEDIUM",
+        "area": "MailLog Phase 불일치",
+        "missing": "MailLog가 Phase 5인데 Recall SMS (Phase 4)에서 필요",
+        "impact": "Phase 4 구현 시 CLAUDE.md 규칙 '이메일·SMS 발송 시 반드시 MailLog 기록' 위반 가능",
+        "recommendation": "MailLog 기본 발송 기능을 Phase 4 Sprint 3에서 선행 구현. Phase 5에서는 MailLogPage UI + 재발송 + 통계만."
+      },
+      {
+        "id": "GAP-6",
+        "severity": "MEDIUM",
+        "area": "Exchange/Return",
+        "missing": "반품 환불 프로세스 미확정 (자동 vs 수동)",
+        "recommendation": "PROCESSING→COMPLETED 사이에 '환불 대기' 중간 상태 추가 검토."
+      }
+    ],
+
+    "technical_risks": [
+      {
+        "risk": "TypeScript 6 + 신규 라이브러리 호환",
+        "probability": "MEDIUM",
+        "impact": "Sprint 0에서 디버깅 시간 소요",
+        "mitigation": "설치 직후 tsc --noEmit 즉시 검증"
+      },
+      {
+        "risk": "Spring 백엔드 가용성",
+        "probability": "HIGH",
+        "impact": "Sprint 1~4 프론트엔드 차단",
+        "mitigation": "MSW 목 핸들러 구축 (8h 투자)"
+      },
+      {
+        "risk": "재고 시스템 API 미확인",
+        "probability": "HIGH",
+        "impact": "DoD-4 달성 불확실",
+        "mitigation": "Spring 팀 확인 + Mock API 우선"
+      },
+      {
+        "risk": "설계 과잉 (440KB 문서 vs 29파일 코드)",
+        "probability": "CERTAIN",
+        "impact": "설계 충실도 추구 시 구현 지연",
+        "mitigation": "설계 문서는 참조용. 코드 작성 시 실용적 판단 우선."
+      }
+    ],
+
+    "priority_recommendation": {
+      "P0_immediate": [
+        "as_tickets DDL 정의 (2h)",
+        "router.tsx 동적 라우트 추가 (2h)",
+        "createHashRouter 전환 (2h)",
+        "Sprint 0 시작: npm install → apiClient → authStore → types → guards → login (40h)"
+      ],
+      "P1_sprint_1": [
+        "Ticket CRUD + 6-step stepper + event timeline (62h)",
+        "MSW 목 핸들러 45 endpoints (8h)"
+      ],
+      "P2_sprint_2": [
+        "CostTracking 3축 + approval (14h)",
+        "TicketAssign 자동 배정 (16h)",
+        "MailLog 기본 발송 기능 선행 (4h) — Phase 4 Recall SMS 대비"
+      ],
+      "P3_sprint_3": [
+        "Shipment + Recall (12h each)",
+        "ExchangeReturn + ProductRegistration (16h + 8h)"
+      ],
+      "P4_sprint_4": [
+        "MailLog 페이지 + AI + Statistics + Reports (66h)",
+        "SettingsPage (8h)"
+      ]
+    }
+  },
+
+  "verdict": {
+    "title": "종합 판정",
+
+    "overall_grade": "B+",
+
+    "scores": {
+      "요구사항 완결성": "A- (4 GoD 전부 다루어짐, 각 페이지 목표 명확. 재고 API + 환불 프로세스 미확정이 감점 요인)",
+      "기술적 타당성": "B+ (데이터 모델 현실적, API 구현 가능, as_tickets DDL 누락이 유일한 CRITICAL)",
+      "의존성 분석": "B+ (순서 올바름, MailLog Phase 불일치 1건, 재고 시스템 미확인 1건)",
+      "누락/개선사항": "B (CRITICAL 4건, HIGH 2건, MEDIUM 2건 식별. 모두 해결 가능)"
+    },
+
+    "conclusion": "설계 산출물 21개(440KB)는 Phase 2~5 전 범위를 포괄적으로 다루고 있으며, 4개 GoD를 충족하는 기술 경로가 명확합니다. 주요 위험은 (1) as_tickets DDL 누락, (2) 재고 시스템 API 미확인, (3) MailLog Phase 불일치, (4) 코드 vs 설계 극심한 갭입니다. 이 4가지를 Sprint 0 시작 전에 해소하면 구현에 착수할 수 있습니다.",
+
+    "recommendation": "APPROVED for Sprint 0 start, contingent on resolving GAP-1 (as_tickets DDL) and GAP-4 (hash router). 총 소요: ~9.5주 (원래 8주 + 1.5주 버퍼)."
+  }
+}
