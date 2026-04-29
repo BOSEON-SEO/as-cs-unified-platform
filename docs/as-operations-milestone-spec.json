@@ -1,0 +1,461 @@
+{
+  "meta": {
+    "document": "A/S Operations Milestone — Detailed Specification",
+    "milestone": "비용 3축 · 출고 · 회수 · 교환/반품",
+    "createdAt": "2026-04-29",
+    "roadmap_mapping": {
+      "cost_tracking": "Phase 3 — A/S 비용 추적 (지출·수납·본사보상 3축)",
+      "shipment": "Phase 4 — A/S 출고 관리 (수신인 입력 → CX 인계)",
+      "recall": "Phase 4 — 회수 추적 (기사 배정, 미회수 건 대시보드)",
+      "exchange_return": "Phase 4 — 교환&반품 처리 (재고 재등록·리퍼브·부품 분기)"
+    },
+    "dod_criteria": [
+      "DoD-1: 비용 3축 합산 수치 정확 (Phase 3)",
+      "DoD-2: 출고 생성 후 CX 인계 상태 반영 (Phase 4)",
+      "DoD-3: 미회수 건 필터링 가능 (Phase 4)",
+      "DoD-4: 교환·반품 완료 후 재고 상태 정상 갱신 (Phase 4)"
+    ]
+  },
+
+  "page1_cost_tracking": {
+    "title": "1. CostTrackingPage — 비용 3축 추적",
+    "route": "/6",
+    "dod": "DoD-1: 비용 3축 합산 수치 정확",
+
+    "user_flow": [
+      "1. A/S 담당자: 티켓 상세(step 4) → [비용 추가] → 축 선택(지출/수납/보상) → 항목 동적 → 금액 → 저장 → PENDING",
+      "2. 팀장: /6 비용 추적 페이지 → 필터 '대기' → 목록에서 건 확인 → [승인] or [반려(사유)]",
+      "3. 승인 → 월별 집계 자동 갱신. 반려 → 담당자 수정 후 재제출",
+      "4. 팀장/총괄: 월별 집계 테이블 확인 → 순비용 = 수납 + 보상 - 지출",
+      "5. Excel 다운로드 → 본사 보상 정산 자료"
+    ],
+
+    "data_model": {
+      "table": "as_cost_entries",
+      "columns": [
+        { "name": "cost_id", "type": "BIGINT UNSIGNED AUTO_INCREMENT PK" },
+        { "name": "ticket_id", "type": "BIGINT UNSIGNED NOT NULL FK→as_tickets" },
+        { "name": "axis", "type": "ENUM('OUR_EXPENSE','CUSTOMER_PAYMENT','VENDOR_COMPENSATION') NOT NULL" },
+        { "name": "category", "type": "VARCHAR(50) NOT NULL", "validation": "axis별 허용 목록 교차 검증" },
+        { "name": "amount", "type": "INT NOT NULL CHECK(amount >= 0)", "unit": "원(KRW)" },
+        { "name": "description", "type": "VARCHAR(500) NULL" },
+        { "name": "receipt_url", "type": "VARCHAR(500) NULL" },
+        { "name": "status", "type": "ENUM('PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'PENDING'" },
+        { "name": "rejection_reason", "type": "VARCHAR(500) NULL" },
+        { "name": "created_by", "type": "BIGINT UNSIGNED NOT NULL FK→users" },
+        { "name": "approved_by", "type": "BIGINT UNSIGNED NULL FK→users" },
+        { "name": "created_at", "type": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" },
+        { "name": "updated_at", "type": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP" }
+      ],
+      "indexes": ["(ticket_id)", "(axis, created_at)", "(status, created_at)", "(created_by)"],
+      "axis_category_map": {
+        "OUR_EXPENSE": ["PARTS(부품비)", "SHIPPING(택배비)", "REPAIR_LABOR(수리비)", "OTHER_EXPENSE(기타)"],
+        "CUSTOMER_PAYMENT": ["REPAIR_CHARGE(수리비 청구)", "SHIPPING_CHARGE(택배비 청구)", "OTHER_PAYMENT(기타)"],
+        "VENDOR_COMPENSATION": ["CLAIM_COMPENSATION(클레임 보상금)", "WARRANTY_REPAIR(무상 수리 보전)", "OTHER_COMPENSATION(기타)"]
+      },
+      "net_cost_formula": "netCost = SUM(CUSTOMER_PAYMENT) + SUM(VENDOR_COMPENSATION) - SUM(OUR_EXPENSE), APPROVED only"
+    },
+
+    "api_endpoints": [
+      { "method": "POST", "path": "/api/tickets/{ticketId}/costs", "desc": "비용 입력", "rbac": "AS_ENGINEER, ADMIN" },
+      { "method": "GET", "path": "/api/tickets/{ticketId}/costs", "desc": "티켓별 비용 목록", "rbac": "AS_ENGINEER(own), TEAM_LEAD+" },
+      { "method": "PATCH", "path": "/api/tickets/{ticketId}/costs/{costId}", "desc": "수정/승인/반려", "rbac": "creator(edit), TEAM_LEAD+(approve)" },
+      { "method": "DELETE", "path": "/api/tickets/{ticketId}/costs/{costId}", "desc": "삭제", "rbac": "ADMIN only" },
+      { "method": "GET", "path": "/api/costs/summary", "desc": "월별 집계 (APPROVED only)", "rbac": "TEAM_LEAD+" },
+      { "method": "GET", "path": "/api/costs", "desc": "전체 비용 목록 (필터·페이징)", "rbac": "TEAM_LEAD+" }
+    ],
+
+    "approval_state_machine": {
+      "PENDING→APPROVED": "TEAM_LEAD/ADMIN, no guard",
+      "PENDING→REJECTED": "TEAM_LEAD/ADMIN, rejection_reason >=5 chars required",
+      "REJECTED→PENDING": "original creator only, amount or category must change"
+    },
+
+    "dod_verification": {
+      "test": "Create 3 cost entries (1 per axis) → approve all → GET /costs/summary → verify: totalExpense=A, totalPayment=B, totalCompensation=C, netCost=B+C-A",
+      "edge_case": "REJECTED entries NOT included in summary. PENDING entries NOT included."
+    },
+
+    "cross_page_dependency": {
+      "from_ticket_detail": "TicketDetailPage step 4 → [비용 추가] → CostEntryForm (same component reused)",
+      "to_report": "ReportPage COMPENSATION type reads from /api/costs/summary for 본사 보상 정산"
+    }
+  },
+
+  "page2_shipment": {
+    "title": "2. ShipmentPage — 출고 관리",
+    "route": "/7",
+    "dod": "DoD-2: 출고 생성 후 CX 인계 상태 반영",
+
+    "user_flow": [
+      "1. A/S 담당자: 티켓 상세(step 5) → [출고 등록] → 수신인 auto-fill → 택배사·송장 입력 → CX 인계 체크 → 저장",
+      "2. 저장 → Shipment 생성 (PREPARING or DISPATCHED if 송장 입력). Ticket status → SHIPPING",
+      "3. 송장 입력 → 자동 DISPATCHED. 택배 추적 링크 생성",
+      "4. CX 인계 checked → CS/CX에 알림 발송. CX handover status = PENDING",
+      "5. CS/CX: /7 출고 관리 → CX 인계 대기 탭 → [인계 확인] 클릭 → CONFIRMED",
+      "6. 배달 완료: 택배사 API or 수동 마킹 → DELIVERED"
+    ],
+
+    "data_model": {
+      "table": "as_shipments",
+      "columns": [
+        { "name": "shipment_id", "type": "BIGINT UNSIGNED AUTO_INCREMENT PK" },
+        { "name": "ticket_id", "type": "BIGINT UNSIGNED NOT NULL FK→as_tickets" },
+        { "name": "recipient_name", "type": "VARCHAR(100) NOT NULL" },
+        { "name": "recipient_phone", "type": "VARCHAR(20) NOT NULL" },
+        { "name": "address", "type": "VARCHAR(500) NOT NULL" },
+        { "name": "shipment_type", "type": "ENUM('REPAIRED','EXCHANGE_NEW','REFURBISHED') NOT NULL" },
+        { "name": "carrier", "type": "VARCHAR(50) NOT NULL" },
+        { "name": "tracking_no", "type": "VARCHAR(50) NULL" },
+        { "name": "status", "type": "ENUM('PREPARING','DISPATCHED','DELIVERED','CANCELLED') NOT NULL DEFAULT 'PREPARING'" },
+        { "name": "cx_handover", "type": "ENUM('NOT_REQUIRED','PENDING','CONFIRMED') NOT NULL DEFAULT 'NOT_REQUIRED'" },
+        { "name": "note", "type": "VARCHAR(500) NULL" },
+        { "name": "cancel_reason", "type": "VARCHAR(500) NULL" },
+        { "name": "created_by", "type": "BIGINT UNSIGNED NOT NULL FK→users" },
+        { "name": "created_at", "type": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" },
+        { "name": "dispatched_at", "type": "DATETIME NULL" },
+        { "name": "delivered_at", "type": "DATETIME NULL" }
+      ],
+      "indexes": ["(ticket_id)", "(status, created_at)", "(cx_handover)", "(carrier, tracking_no)"]
+    },
+
+    "state_machine": {
+      "PREPARING→DISPATCHED": "tracking_no 입력 시 자동 전이",
+      "PREPARING→CANCELLED": "cancel_reason required",
+      "DISPATCHED→DELIVERED": "택배사 API or 수동 마킹",
+      "DISPATCHED→CANCELLED": "cancel_reason required (rare)"
+    },
+
+    "cx_handover_protocol": {
+      "flow": [
+        "1. A/S 담당자가 출고 생성 시 cxHandover=true 체크",
+        "2. 서버: cx_handover='PENDING'. CS/CX에 알림 발송 (system auto notification)",
+        "3. CS/CX가 /7 → 'CX 인계 대기' 탭 → 해당 건 확인 → [인계 확인] 클릭",
+        "4. PATCH /api/shipments/{id} { cxHandover: 'CONFIRMED' }",
+        "5. CS/CX가 고객에게 배송 안내 이메일/SMS 발송 가능 (MailLog 기록)"
+      ],
+      "rbac": {
+        "create_shipment": "AS_ENGINEER, ADMIN",
+        "confirm_handover": "CS_CX, TEAM_LEAD, ADMIN",
+        "view": "ALL"
+      }
+    },
+
+    "carrier_tracking": {
+      "url_patterns": {
+        "CJ대한통운": "https://trace.cjlogistics.com/web/detail.jsp?slipno={trackingNo}",
+        "한진택배": "https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?wblnb={trackingNo}",
+        "로젠택배": "https://www.ilogen.com/web/personal/trace/{trackingNo}",
+        "우체국": "https://service.epost.go.kr/trace.RetrieveDomRi498TraceList.comm?sid1={trackingNo}"
+      },
+      "api_integration": "Phase 4 택배사 API 연동. 초기에는 추적 링크만 제공 (새 탭 오픈). 자동 배달 확인은 후속."
+    },
+
+    "api_endpoints": [
+      { "method": "POST", "path": "/api/shipments", "desc": "출고 생성 (ticket status → SHIPPING)", "rbac": "AS_ENGINEER, ADMIN" },
+      { "method": "GET", "path": "/api/shipments", "desc": "출고 목록 (status·carrier·cxHandover 필터)", "rbac": "ALL" },
+      { "method": "PATCH", "path": "/api/shipments/{id}", "desc": "수정/송장입력/CX확인/배달완료/취소", "rbac": "varies" },
+      { "method": "DELETE", "path": "/api/shipments/{id}", "desc": "삭제", "rbac": "ADMIN" },
+      { "method": "GET", "path": "/api/shipments/{id}/tracking", "desc": "택배 추적 URL 반환", "rbac": "ALL" }
+    ],
+
+    "side_effects": [
+      "POST /api/shipments → UPDATE as_tickets SET status='SHIPPING' (if IN_PROGRESS or COST_ENTERED)",
+      "POST /api/shipments → INSERT as_ticket_events (SHIPMENT_CREATED)",
+      "tracking_no 입력 → INSERT as_ticket_events (SHIPMENT_DISPATCHED)",
+      "cxHandover=true → system auto notification to CS/CX"
+    ],
+
+    "dod_verification": {
+      "test": "Create shipment with cxHandover=true → verify cx_handover='PENDING' → login as CS_CX → confirm → verify 'CONFIRMED'",
+      "edge_case": "Ticket에 shipment 없이 CLOSED 시도 → guard: ticketType이 수리/교환이면 shipment 필수"
+    }
+  },
+
+  "page3_recall": {
+    "title": "3. RecallPage — 회수 관리",
+    "route": "/8",
+    "dod": "DoD-3: 미회수 건 필터링 가능",
+
+    "user_flow": [
+      "1. A/S 담당자: 티켓 상세(step 5) → [회수 요청] → 고객 auto-fill → 방식(기사/택배) → 기사 선택 → 수거일 → 저장",
+      "2. 기사 직접: driverId 필수 → ASSIGNED + SMS 발송. 일반 택배: REQUESTED",
+      "3. 기사 수거 완료: [수거 완료] → condition + grade(A/B/C) 입력 → COMPLETED",
+      "4. 미회수 모니터링: /8 → '미회수' 탭 → pickupDate < today AND status IN (REQUESTED, ASSIGNED)",
+      "5. 팀장: KPI 확인 (미회수, 금일배정, 금일완료, 평균회수일)"
+    ],
+
+    "data_model": {
+      "table_recalls": {
+        "name": "as_recalls",
+        "columns": [
+          { "name": "recall_id", "type": "BIGINT UNSIGNED AUTO_INCREMENT PK" },
+          { "name": "ticket_id", "type": "BIGINT UNSIGNED NOT NULL FK→as_tickets" },
+          { "name": "customer_name", "type": "VARCHAR(100) NOT NULL" },
+          { "name": "customer_phone", "type": "VARCHAR(20) NOT NULL" },
+          { "name": "address", "type": "VARCHAR(500) NOT NULL" },
+          { "name": "product_model", "type": "VARCHAR(100) NOT NULL" },
+          { "name": "recall_method", "type": "ENUM('DRIVER_DIRECT','COURIER') NOT NULL" },
+          { "name": "driver_id", "type": "BIGINT UNSIGNED NULL FK→as_drivers" },
+          { "name": "pickup_date", "type": "DATE NOT NULL" },
+          { "name": "status", "type": "ENUM('REQUESTED','ASSIGNED','COMPLETED','CANCELLED') NOT NULL DEFAULT 'REQUESTED'" },
+          { "name": "condition_note", "type": "VARCHAR(500) NULL" },
+          { "name": "grade", "type": "ENUM('A','B','C') NULL" },
+          { "name": "note", "type": "VARCHAR(500) NULL" },
+          { "name": "cancel_reason", "type": "VARCHAR(500) NULL" },
+          { "name": "created_by", "type": "BIGINT UNSIGNED NOT NULL FK→users" },
+          { "name": "created_at", "type": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" },
+          { "name": "completed_at", "type": "DATETIME NULL" }
+        ],
+        "indexes": ["(ticket_id)", "(status, pickup_date)", "(driver_id, status)", "(status, pickup_date) for overdue"]
+      },
+      "table_drivers": {
+        "name": "as_drivers",
+        "columns": [
+          { "name": "driver_id", "type": "BIGINT UNSIGNED AUTO_INCREMENT PK" },
+          { "name": "name", "type": "VARCHAR(50) NOT NULL" },
+          { "name": "phone", "type": "VARCHAR(20) NOT NULL" },
+          { "name": "region", "type": "VARCHAR(100) NULL" },
+          { "name": "max_capacity", "type": "INT UNSIGNED NOT NULL DEFAULT 10" },
+          { "name": "available", "type": "BOOLEAN NOT NULL DEFAULT TRUE" }
+        ]
+      }
+    },
+
+    "state_machine": {
+      "REQUESTED→ASSIGNED": "driverId set + SMS to driver (MailLog)",
+      "REQUESTED→CANCELLED": "cancel_reason required",
+      "ASSIGNED→COMPLETED": "condition_note + grade(A/B/C) required",
+      "ASSIGNED→REQUESTED": "driver reassign (reason required, old driver unlinked)",
+      "ASSIGNED→CANCELLED": "cancel_reason required"
+    },
+
+    "overdue_detection": {
+      "query": "SELECT * FROM as_recalls WHERE status IN ('REQUESTED','ASSIGNED') AND pickup_date < CURDATE()",
+      "schedule": "@Scheduled cron 0 0 9 * * MON-FRI (매 영업일 09:00)",
+      "action": "TEAM_LEAD에 시스템 알림",
+      "ui_filter": "RecallPage 미회수 탭 = 위 쿼리 결과"
+    },
+
+    "carrier_api_integration": {
+      "driver_direct": "SMS 발송 via POST /api/messages/send { channel: 'SMS', recipient: driver.phone, content: 수거 안내 }",
+      "courier": "택배사 API 연동점은 Shipment과 동일. 회수 전용 송장은 별도 관리 가능 (Phase 4 확장)",
+      "domain_rule": "회수 관리는 판매 후 단기 접수 건(직접 기사 배정)만 해당 (CLAUDE.md)"
+    },
+
+    "api_endpoints": [
+      { "method": "POST", "path": "/api/recalls", "desc": "회수 요청 (ticket status → SHIPPING)", "rbac": "AS_ENGINEER, TEAM_LEAD, ADMIN" },
+      { "method": "GET", "path": "/api/recalls", "desc": "회수 목록 (status·driverId 필터)", "rbac": "ALL" },
+      { "method": "PATCH", "path": "/api/recalls/{id}", "desc": "기사배정/수거완료/재배정/취소", "rbac": "AS_ENGINEER, TEAM_LEAD, ADMIN" },
+      { "method": "DELETE", "path": "/api/recalls/{id}", "desc": "삭제", "rbac": "ADMIN" },
+      { "method": "GET", "path": "/api/recalls/pending", "desc": "미회수 건 + overdue 집계", "rbac": "TEAM_LEAD+" },
+      { "method": "GET", "path": "/api/drivers", "desc": "기사 목록 + 현재 부하", "rbac": "AS_ENGINEER+" },
+      { "method": "GET", "path": "/api/drivers/{id}/recalls", "desc": "기사별 회수 현황", "rbac": "TEAM_LEAD+" }
+    ],
+
+    "dod_verification": {
+      "test": "Create recall (pickup_date=yesterday, status=REQUESTED) → navigate to /8 → '미회수' tab → verify this recall appears in the filtered list",
+      "edge_case": "pickup_date=today → NOT overdue (today is valid). pickup_date=yesterday → IS overdue."
+    }
+  },
+
+  "page4_exchange_return": {
+    "title": "4. ExchangeReturnPage — 교환·반품 관리",
+    "route": "/10",
+    "dod": "DoD-4: 교환·반품 완료 후 재고 상태 정상 갱신",
+
+    "user_flow": [
+      "1. CS/CX or A/S: [+ 신규 접수] → 고객(전화번호 검색) + 제품 + 유형(교환/반품) + 사유 → 저장 → status=RECEIVED",
+      "2. 회수 완료 후(RecallPage에서 COMPLETED): 교환/반품 건의 status=INSPECTION_READY",
+      "3. A/S 담당자: 검수 시작 → [검수 완료] → 검수결과(정상/불량/부분불량) + 사진 → status=INSPECTED",
+      "4. A/S 담당자: 처리 분기 선택 (필수): 재고 재등록 / 리퍼브 / 부품 처리",
+      "5-A. 재고 재등록: 원래 SKU로 재입고. 재고 DB UPDATE stock+1",
+      "5-B. 리퍼브: 리퍼브 등급(A/B/C) + 리퍼브 SKU. 재고 DB INSERT (refurbished item)",
+      "5-C. 부품 처리: 부품별 분해 목록. 각 부품 재고 반영 or 폐기",
+      "6. 교환인 경우: [교환 출고 생성] → Shipment 자동 생성 (신품 or 리퍼브 발송)",
+      "7. 반품인 경우: 환불 프로세스 트리거 (수동/자동 — 미확정)",
+      "8. status=COMPLETED"
+    ],
+
+    "data_model": {
+      "table": "as_exchange_returns",
+      "columns": [
+        { "name": "exchange_id", "type": "BIGINT UNSIGNED AUTO_INCREMENT PK" },
+        { "name": "ticket_id", "type": "BIGINT UNSIGNED NULL FK→as_tickets" },
+        { "name": "recall_id", "type": "BIGINT UNSIGNED NULL FK→as_recalls", "note": "회수와 연결" },
+        { "name": "customer_name", "type": "VARCHAR(100) NOT NULL" },
+        { "name": "customer_phone", "type": "VARCHAR(20) NOT NULL" },
+        { "name": "product_model", "type": "VARCHAR(100) NOT NULL" },
+        { "name": "serial_number", "type": "VARCHAR(100) NULL" },
+        { "name": "exchange_type", "type": "ENUM('EXCHANGE','RETURN') NOT NULL" },
+        { "name": "reason", "type": "ENUM('DEFECTIVE','WRONG_DELIVERY','CHANGE_OF_MIND','OTHER') NOT NULL" },
+        { "name": "reason_detail", "type": "VARCHAR(500) NULL" },
+        { "name": "status", "type": "ENUM('RECEIVED','INSPECTION_READY','INSPECTED','PROCESSING','COMPLETED','CANCELLED') NOT NULL DEFAULT 'RECEIVED'" },
+        { "name": "inspection_result", "type": "ENUM('NORMAL','DEFECTIVE','PARTIAL_DEFECTIVE') NULL" },
+        { "name": "inspection_note", "type": "VARCHAR(500) NULL" },
+        { "name": "inspection_photos", "type": "JSON NULL", "note": "[{url, fileName}]" },
+        { "name": "restock_type", "type": "ENUM('RESTOCK','REFURBISH','PARTS') NULL", "note": "처리 분기 (필수 선택)" },
+        { "name": "refurbish_grade", "type": "ENUM('A','B','C') NULL" },
+        { "name": "parts_detail", "type": "JSON NULL", "note": "[{partName, action: 'restock'|'dispose'}]" },
+        { "name": "exchange_shipment_id", "type": "BIGINT UNSIGNED NULL FK→as_shipments", "note": "교환 출고 연결" },
+        { "name": "created_by", "type": "BIGINT UNSIGNED NOT NULL FK→users" },
+        { "name": "created_at", "type": "DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP" },
+        { "name": "completed_at", "type": "DATETIME NULL" }
+      ],
+      "indexes": ["(ticket_id)", "(exchange_type, status)", "(recall_id)", "(restock_type)"]
+    },
+
+    "state_machine": {
+      "RECEIVED→INSPECTION_READY": "auto (recall COMPLETED triggers this)",
+      "INSPECTION_READY→INSPECTED": "검수 결과 + 사진 입력",
+      "INSPECTED→PROCESSING": "처리 분기(restock_type) 선택",
+      "PROCESSING→COMPLETED": "재고 반영 확인 (교환: shipment 생성, 반품: 환불 트리거)",
+      "any→CANCELLED": "cancel_reason required"
+    },
+
+    "inventory_integration": {
+      "restock": {
+        "action": "기존 SKU 재고 +1",
+        "api": "POST /api/inventory/restock { sku, quantity: 1, condition: 'USED_NORMAL' }",
+        "note": "기존 재고 시스템 API 확인 필요. CLAUDE.md: '기존 MySQL 통합 DB, 스키마 추가 방향만 허용'"
+      },
+      "refurbish": {
+        "action": "리퍼브 SKU 재고 등록 (등급별 별도 SKU)",
+        "api": "POST /api/inventory/refurbish { originalSku, refurbishGrade, quantity: 1 }",
+        "sku_pattern": "{original_sku}-REF-{grade} (예: WE300-REF-B)"
+      },
+      "parts": {
+        "action": "부품별 개별 처리 (재입고 or 폐기)",
+        "api": "POST /api/inventory/parts { items: [{partSku, action: 'restock'|'dispose'}] }",
+        "note": "부품 SKU 체계가 존재하는지 확인 필요. 없으면 자유 텍스트 + 수동 처리."
+      },
+      "verification": "재고 시스템 반영 후 확인 응답 받아야 status=COMPLETED 전이 가능. 실패 시 status=PROCESSING 유지 + 에러 표시."
+    },
+
+    "exchange_auto_shipment": {
+      "trigger": "교환(EXCHANGE) 유형 + INSPECTED 상태에서 [교환 출고 생성] 버튼 클릭",
+      "auto_action": [
+        "1. POST /api/shipments { ticketId, recipientName: customer, shipmentType: 'EXCHANGE_NEW' or 'REFURBISHED', ... }",
+        "2. Shipment 생성 → shipment_id를 exchange_returns.exchange_shipment_id에 저장",
+        "3. 출고 목록(/7)에 해당 건 표시"
+      ],
+      "note": "교환 출고와 일반 A/S 출고가 동일 as_shipments 테이블 사용. shipment_type으로 구분."
+    },
+
+    "api_endpoints": [
+      { "method": "GET", "path": "/api/exchanges", "desc": "교환·반품 목록 (type·status 필터)", "rbac": "ALL" },
+      { "method": "GET", "path": "/api/exchanges/{id}", "desc": "상세 조회", "rbac": "ALL" },
+      { "method": "POST", "path": "/api/exchanges", "desc": "신규 접수", "rbac": "CS_CX+" },
+      { "method": "PATCH", "path": "/api/exchanges/{id}", "desc": "상태 변경", "rbac": "AS_ENGINEER+" },
+      { "method": "POST", "path": "/api/exchanges/{id}/inspect", "desc": "검수 결과 등록 (사진)", "rbac": "AS_ENGINEER+" },
+      { "method": "POST", "path": "/api/exchanges/{id}/restock", "desc": "처리 분기 실행", "rbac": "AS_ENGINEER+" },
+      { "method": "POST", "path": "/api/exchanges/{id}/ship", "desc": "교환 출고 자동 생성", "rbac": "AS_ENGINEER+" },
+      { "method": "GET", "path": "/api/exchanges/stats", "desc": "유형별/상태별 집계", "rbac": "TEAM_LEAD+" }
+    ],
+
+    "dod_verification": {
+      "test_restock": "교환 접수 → 회수 완료(grade=A) → 검수 → 처리분기=재고재등록 → verify inventory API called with sku + quantity=1",
+      "test_refurbish": "반품 접수 → 검수 → 처리분기=리퍼브(B등급) → verify refurbish SKU created",
+      "test_parts": "반품 접수 → 검수 → 처리분기=부품처리 → 3개 부품 중 2개 재입고, 1개 폐기 → verify 2 restock + 1 dispose",
+      "test_exchange_shipment": "교환 → 검수 완료 → [교환 출고 생성] → verify as_shipments row created with shipment_type=EXCHANGE_NEW"
+    }
+  },
+
+  "cross_page_dependencies": {
+    "title": "페이지 간 데이터 의존성",
+
+    "flows": [
+      {
+        "flow": "Ticket → Cost → Report",
+        "detail": "TicketDetailPage step 4 → CostEntry 입력 → CostTrackingPage 목록/집계 → ReportPage 본사 보상 정산",
+        "shared_data": "ticket_id FK, cost_id, axis, amount, status"
+      },
+      {
+        "flow": "Ticket → Shipment → CX",
+        "detail": "TicketDetailPage step 5 → Shipment 생성 → ShipmentPage 목록 → CX handover → CS/CX 고객 안내",
+        "shared_data": "ticket_id FK, shipment_id, cx_handover status",
+        "side_effect": "Shipment 생성 → ticket.status = SHIPPING"
+      },
+      {
+        "flow": "Ticket → Recall → Exchange/Return",
+        "detail": "TicketDetailPage step 5 → Recall 생성 → RecallPage 추적 → Recall COMPLETED(grade) → ExchangeReturn INSPECTION_READY",
+        "shared_data": "ticket_id FK, recall_id FK, grade(A/B/C)"
+      },
+      {
+        "flow": "Exchange/Return → Shipment (교환 출고)",
+        "detail": "ExchangeReturn INSPECTED → [교환 출고 생성] → Shipment 자동 생성 → ShipmentPage 목록",
+        "shared_data": "exchange_shipment_id FK → as_shipments"
+      },
+      {
+        "flow": "Exchange/Return → Inventory (재고 분기)",
+        "detail": "ExchangeReturn PROCESSING → restock_type 분기 → Inventory API 호출 → 재고 DB 업데이트",
+        "external_system": "기존 재고 시스템 (API 확인 필요)"
+      },
+      {
+        "flow": "Recall SMS → MailLog",
+        "detail": "Recall 기사 배정 → SMS 발송 → MailLog 기록 (CLAUDE.md 규칙)",
+        "shared_data": "mail_log_id, as_ticket_events (PICKUP_SCHEDULED)"
+      }
+    ]
+  },
+
+  "technical_path_to_all_dod": {
+    "title": "4개 DoD 충족 기술 경로",
+
+    "implementation_order": [
+      {
+        "step": 1,
+        "target": "DoD-1 (비용 3축 합산 정확)",
+        "tasks": [
+          "[Spring] as_cost_entries DDL + CRUD + approval workflow",
+          "[Frontend] CostTrackingPage: KPI + monthly table + cost list + CostEntryForm",
+          "[Frontend] TicketDetailPage step 4 연동",
+          "[Test] 3축 각 1건 → approve → summary 검증"
+        ],
+        "effort": "14h (backend 6h + frontend 8h)",
+        "phase": "Phase 3 Sprint 2"
+      },
+      {
+        "step": 2,
+        "target": "DoD-2 (출고 CX 인계 반영)",
+        "tasks": [
+          "[Spring] as_shipments DDL + CRUD + state machine + CX handover",
+          "[Spring] POST /shipments → ticket status SHIPPING side-effect",
+          "[Frontend] ShipmentPage: 4-tab list + create panel + tracking links",
+          "[Test] Create shipment(cxHandover=true) → CS_CX confirm → verify CONFIRMED"
+        ],
+        "effort": "12h (backend 5h + frontend 7h)",
+        "phase": "Phase 4 Sprint 3"
+      },
+      {
+        "step": 3,
+        "target": "DoD-3 (미회수 필터링)",
+        "tasks": [
+          "[Spring] as_recalls + as_drivers DDL + CRUD + overdue detection",
+          "[Spring] SMS 발송 (기사 배정 시, MailLog 연동)",
+          "[Frontend] RecallPage: KPI + 4-tab list + create panel + driver chart",
+          "[Test] Create recall(pickup_date=yesterday) → /8 미회수 tab → appears"
+        ],
+        "effort": "12h (backend 6h + frontend 6h)",
+        "phase": "Phase 4 Sprint 3"
+      },
+      {
+        "step": 4,
+        "target": "DoD-4 (교환/반품 재고 갱신)",
+        "tasks": [
+          "[Spring] as_exchange_returns DDL + CRUD + inspection + restock API",
+          "[Spring] Inventory API 연동 (기존 재고 시스템 확인 필수)",
+          "[Spring] 교환 출고 자동 생성 (POST /shipments 내부 호출)",
+          "[Frontend] ExchangeReturnPage: list + detail + inspect form + restock branch",
+          "[Test] 3가지 처리 분기 각각 → inventory API 호출 확인"
+        ],
+        "effort": "16h (backend 8h + frontend 8h)",
+        "phase": "Phase 4 Sprint 3~4",
+        "blocker": "기존 재고 시스템 API 스펙 확인 필수 (현재 미확인)"
+      }
+    ],
+
+    "total_effort": "54h (~1.5 weeks)",
+    "critical_dependency": "기존 재고 시스템 API 스펙 — DoD-4 달성의 전제 조건. 미확인 시 Mock API로 구현 후 실제 연동."
+  }
+}
