@@ -276,7 +276,47 @@ const mailLogHandlers = [
 ];
 
 // ---------------------------------------------------------------------------
-// Export all handlers (15 endpoints)
+// 16-18. Reports
+// ---------------------------------------------------------------------------
+
+const reportHandlers = [
+  // 16. GET /reports/preview
+  http.get(`${BASE}/reports/preview`, () => {
+    return HttpResponse.json({
+      totalReceived: 247,
+      totalCompleted: 208,
+      completionRate: 84.4,
+      totalExpense: 3450000,
+      totalCompensation: 1280000,
+      avgDays: 3.2,
+    });
+  }),
+
+  // 17. GET /reports/export/csv (mock blob)
+  http.get(`${BASE}/reports/export/csv`, () => {
+    const csvContent = '\uFEFFA/S\uBC88\uD638,\uC811\uC218\uC77C,\uACE0\uAC1D\uBA85,\uC81C\uD488,\uC0C1\uD0DC\nAS-2641,2026-04-30,\uAE40\uBBFC\uC218,WE-300,\uC9C4\uD589\uC911\nAS-2640,2026-04-30,\uC774\uC601\uD76C,BS-200,\uC811\uC218\n';
+    return new HttpResponse(csvContent, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="report.csv"',
+      },
+    });
+  }),
+
+  // 18. GET /reports/export/xlsx (mock blob)
+  http.get(`${BASE}/reports/export/xlsx`, () => {
+    const mockXlsx = new Uint8Array([80, 75, 3, 4]);
+    return new HttpResponse(mockXlsx, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': 'attachment; filename="report.xlsx"',
+      },
+    });
+  }),
+];
+
+// ---------------------------------------------------------------------------
+// Export all handlers (18 endpoints)
 // ---------------------------------------------------------------------------
 
 export const handlers = [
@@ -287,4 +327,5 @@ export const handlers = [
   ...ticketHandlers,     // 13
   ...shipmentHandlers,   // 14
   ...mailLogHandlers,    // 15
+  ...reportHandlers,     // 16-18
 ];
