@@ -4,7 +4,8 @@ import App from './App.tsx';
 import './index.css';
 
 async function enableMocking(): Promise<void> {
-  if (import.meta.env.VITE_ENABLE_MSW !== 'true') {
+  // Only activate MSW in dev mode when explicitly enabled via .env
+  if (!import.meta.env.DEV || import.meta.env.VITE_ENABLE_MSW !== 'true') {
     return;
   }
 
