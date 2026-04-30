@@ -14,9 +14,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.100.6",
+    "axios": "^1.15.2",
+    "dayjs": "^1.11.20",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
-    "react-router-dom": "^7.6.1"
+    "react-router-dom": "^7.6.1",
+    "recharts": "^3.8.1",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -32,6 +37,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.5.0",
+    "msw": "^2.14.2",
     "tailwindcss": "^4.1.7",
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
