@@ -1,4 +1,4 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createHashRouter } from 'react-router-dom';
 import { AppLayout } from '@/layouts/AppLayout';
 
 import CustomerPage from '@/pages/CustomerPage';
@@ -56,8 +56,10 @@ export const routesMeta: RouteMeta[] = [
 
 /**
  * 앱 라우터 — 17개 페이지, /{pageId} 패턴
+ * createHashRouter: Electron prod 빌드에서 file:// 프로토콜 호환
+ * URL 형태: index.html#/1, index.html#/tickets 등
  */
-export const router = createBrowserRouter([
+export const router = createHashRouter([
   {
     path: '/',
     element: <AppLayout />,
